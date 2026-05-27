@@ -41,6 +41,15 @@ npm link
 openspec-agents list
 ```
 
+Test the packaged CLI in another project from this repository without publishing:
+
+```bash
+npm pack
+cd ../some-other-project
+npm install ../os-agents/eonio-openspec-agents-0.1.0.tgz
+npx openspec-agents list
+```
+
 ## Configuration
 
 The CLI looks for `openspec-agents.config.yaml`, `openspec-agents.config.yml`, or `openspec-agents.config.json` in the current working directory. It also respects:

@@ -143,7 +143,7 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
       token: fileConfig.github?.token ?? process.env.GITHUB_TOKEN,
       apiBaseUrl: fileConfig.github?.apiBaseUrl ?? "https://api.github.com",
       dispatchEventType:
-        fileConfig.github?.dispatchEventType ?? "speckit_orchestrator_handoff",
+        fileConfig.github?.dispatchEventType ?? "openspec_orchestrator_handoff",
       preferSsh: fileConfig.github?.preferSsh ?? true,
     },
     copilot: {

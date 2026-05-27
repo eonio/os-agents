@@ -85,7 +85,7 @@ github:
   token: "YOUR_GITHUB_TOKEN"
   apiBaseUrl: "https://api.github.com"
   preferSsh: true
-  dispatchEventType: "speckit_orchestrator_handoff"
+  dispatchEventType: "openspec_orchestrator_handoff"
 
 copilot:
   model: "gpt-5.4"
@@ -102,10 +102,6 @@ workflow:
     statusCommand: "openspec status --change \"{changeName}\" --json"
     applyCommand: "openspec instructions apply --change \"{changeName}\" --json"
     handoffCommand: "openspec status --change \"{changeName}\" --json"
-
-  speckit:
-    draftCommand: "speckit draft --feature \"{feature}\" --run-id {runId}"
-    handoffCommand: "speckit handoff --run-id {runId} --branch {featureBranch}"
 ```
 
 JSON example:
@@ -123,7 +119,7 @@ JSON example:
     "token": "YOUR_GITHUB_TOKEN",
     "apiBaseUrl": "https://api.github.com",
     "preferSsh": true,
-    "dispatchEventType": "speckit_orchestrator_handoff"
+    "dispatchEventType": "openspec_orchestrator_handoff"
   },
   "copilot": {
     "model": "gpt-5.4",
@@ -139,10 +135,6 @@ JSON example:
       "statusCommand": "openspec status --change \"{changeName}\" --json",
       "applyCommand": "openspec instructions apply --change \"{changeName}\" --json",
       "handoffCommand": "openspec status --change \"{changeName}\" --json"
-    },
-    "speckit": {
-      "draftCommand": "speckit draft --feature \"{feature}\" --run-id {runId}",
-      "handoffCommand": "speckit handoff --run-id {runId} --branch {featureBranch}"
     }
   }
 }
@@ -184,7 +176,7 @@ By default, runtime data lives under `~/.os-agents`:
 
 ## GitHub and CI/CD integration
 
-Every completed run writes a handoff JSON artifact. When `GITHUB_TOKEN` is configured and the repository input resolves to `owner/repo`, the orchestrator also publishes a GitHub `repository_dispatch` event named `speckit_orchestrator_handoff` by default. The payload now includes workflow-provider details and OpenSpec change metadata so GitHub Actions can continue validation, PR creation, or deployment orchestration with workflow context.
+Every completed run writes a handoff JSON artifact. When `GITHUB_TOKEN` is configured and the repository input resolves to `owner/repo`, the orchestrator also publishes a GitHub `repository_dispatch` event named `openspec_orchestrator_handoff` by default. The payload now includes workflow-provider details and OpenSpec change metadata so GitHub Actions can continue validation, PR creation, or deployment orchestration with workflow context.
 
 ## Linux / SSH operating model
 

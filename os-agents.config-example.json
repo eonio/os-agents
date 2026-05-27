@@ -9,7 +9,7 @@
   "github": {
     "token": "YOUR_GITHUB_TOKEN",
     "apiBaseUrl": "https://api.github.com",
-    "dispatchEventType": "speckit_orchestrator_handoff",
+    "dispatchEventType": "openspec_orchestrator_handoff",
     "preferSsh": true
   },
   "copilot": {
@@ -26,10 +26,6 @@
       "statusCommand": "openspec status --change \"{changeName}\" --json",
       "applyCommand": "openspec instructions apply --change \"{changeName}\" --json",
       "handoffCommand": "openspec status --change \"{changeName}\" --json"
-    },
-    "speckit": {
-      "draftCommand": "speckit draft --feature \"{feature}\" --run-id {runId}",
-      "handoffCommand": "speckit handoff --run-id {runId} --branch {featureBranch}"
     }
   }
 }

@@ -35,7 +35,7 @@ export async function createTestConfig(name: string): Promise<AppConfig> {
     },
     github: {
       apiBaseUrl: "https://api.github.com",
-      dispatchEventType: "speckit_orchestrator_handoff",
+      dispatchEventType: "openspec_orchestrator_handoff",
       preferSsh: false,
     },
     copilot: {

@@ -41,7 +41,14 @@ npm link
 os-agents list
 ```
 
-Test the packaged CLI in another project from this repository without publishing:
+Install it in another project directly from GitHub without publishing to npm:
+
+```bash
+npm install https://codeload.github.com/eonio/os-agents/tar.gz/refs/heads/main
+npx os-agents list
+```
+
+Or test the packaged CLI locally from this repository:
 
 ```bash
 npm pack

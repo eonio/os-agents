@@ -3,6 +3,11 @@ import type { AppConfig, RunRecord } from "../domain/types.js";
 import { RunLogger } from "../state/run-logger.js";
 import { HANS_PROFILE, getDeveloperPersona } from "../team/personas.js";
 
+export function isAuthorizationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Authorization error") || message.includes("/login");
+}
+
 function buildPrompt(run: RunRecord): string {
   const repositoryLabel =
     run.repository.owner && run.repository.name
@@ -89,7 +94,11 @@ function describeEvent(event: SessionEvent): string | undefined {
 export class CopilotProvider {
   public constructor(private readonly config: AppConfig) {}
 
-  public async implement(run: RunRecord, logger: RunLogger): Promise<{
+  private async runSession(
+    run: RunRecord,
+    logger: RunLogger,
+    options: { gitHubToken?: string; useLoggedInUser: boolean },
+  ): Promise<{
     sessionId: string;
     summary?: string;
   }> {
@@ -97,8 +106,8 @@ export class CopilotProvider {
       workingDirectory: run.workspacePath,
       baseDirectory: this.config.copilot.baseDirectory,
       logLevel: this.config.copilot.logLevel,
-      gitHubToken: this.config.github.token,
-      useLoggedInUser: !this.config.github.token,
+      gitHubToken: options.gitHubToken,
+      useLoggedInUser: options.useLoggedInUser,
       enableRemoteSessions: this.config.copilot.remoteSessionMode !== "off",
     });
 
@@ -111,7 +120,7 @@ export class CopilotProvider {
         onPermissionRequest: approveAll,
         streaming: true,
         remoteSession: this.config.copilot.remoteSessionMode,
-        gitHubToken: this.config.github.token,
+        gitHubToken: options.gitHubToken,
         infiniteSessions: { enabled: true },
       } as const;
 
@@ -139,6 +148,30 @@ export class CopilotProvider {
       };
     } finally {
       await client.stop();
+    }
+  }
+
+  public async implement(run: RunRecord, logger: RunLogger): Promise<{
+    sessionId: string;
+    summary?: string;
+  }> {
+    try {
+      return await this.runSession(run, logger, {
+        gitHubToken: this.config.github.token,
+        useLoggedInUser: !this.config.github.token,
+      });
+    } catch (error) {
+      if (!this.config.github.token || !isAuthorizationError(error)) {
+        throw error;
+      }
+
+      await logger.log(
+        "GitHub token authorization failed for Copilot SDK; retrying with the logged-in Copilot user.",
+      );
+
+      return this.runSession(run, logger, {
+        useLoggedInUser: true,
+      });
     }
   }
 }

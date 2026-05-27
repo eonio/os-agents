@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isAuthorizationError } from "../src/providers/copilot-provider.js";
+import {
+  isAuthorizationError,
+  isModelUnavailableError,
+} from "../src/providers/copilot-provider.js";
 
 describe("isAuthorizationError", () => {
   it("detects Copilot SDK authorization failures", () => {
@@ -11,5 +14,19 @@ describe("isAuthorizationError", () => {
 
   it("ignores unrelated errors", () => {
     expect(isAuthorizationError(new Error("network timeout"))).toBe(false);
+  });
+});
+
+describe("isModelUnavailableError", () => {
+  it("detects unavailable model failures", () => {
+    expect(
+      isModelUnavailableError(
+        new Error('Request session.create failed with message: Model "gpt-4o" is not available.'),
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores unrelated model errors", () => {
+    expect(isModelUnavailableError(new Error("network timeout"))).toBe(false);
   });
 });

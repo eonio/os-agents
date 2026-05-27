@@ -3,9 +3,16 @@ import type { AppConfig, RunRecord } from "../domain/types.js";
 import { RunLogger } from "../state/run-logger.js";
 import { HANS_PROFILE, getDeveloperPersona } from "../team/personas.js";
 
+const DEFAULT_MODEL = "gpt-5.4";
+
 export function isAuthorizationError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("Authorization error") || message.includes("/login");
+}
+
+export function isModelUnavailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('Model "') && message.includes('" is not available');
 }
 
 function buildPrompt(run: RunRecord): string {
@@ -97,7 +104,7 @@ export class CopilotProvider {
   private async runSession(
     run: RunRecord,
     logger: RunLogger,
-    options: { gitHubToken?: string; useLoggedInUser: boolean },
+    options: { gitHubToken?: string; useLoggedInUser: boolean; model: string },
   ): Promise<{
     sessionId: string;
     summary?: string;
@@ -115,7 +122,7 @@ export class CopilotProvider {
 
     try {
       const sessionConfig = {
-        model: this.config.copilot.model,
+      model: options.model,
         workingDirectory: run.workspacePath,
         onPermissionRequest: approveAll,
         streaming: true,
@@ -159,19 +166,36 @@ export class CopilotProvider {
       return await this.runSession(run, logger, {
         gitHubToken: this.config.github.token,
         useLoggedInUser: !this.config.github.token,
+        model: this.config.copilot.model,
       });
     } catch (error) {
-      if (!this.config.github.token || !isAuthorizationError(error)) {
-        throw error;
+      if (this.config.github.token && isAuthorizationError(error)) {
+        await logger.log(
+          "GitHub token authorization failed for Copilot SDK; retrying with the logged-in Copilot user.",
+        );
+
+        return this.runSession(run, logger, {
+          useLoggedInUser: true,
+          model: this.config.copilot.model,
+        });
       }
 
-      await logger.log(
-        "GitHub token authorization failed for Copilot SDK; retrying with the logged-in Copilot user.",
-      );
+      if (
+        this.config.copilot.model !== DEFAULT_MODEL &&
+        isModelUnavailableError(error)
+      ) {
+        await logger.log(
+          `Configured Copilot model "${this.config.copilot.model}" is unavailable; retrying with "${DEFAULT_MODEL}".`,
+        );
 
-      return this.runSession(run, logger, {
-        useLoggedInUser: true,
-      });
+        return this.runSession(run, logger, {
+          gitHubToken: this.config.github.token,
+          useLoggedInUser: !this.config.github.token,
+          model: DEFAULT_MODEL,
+        });
+      }
+
+      throw error;
     }
   }
 }

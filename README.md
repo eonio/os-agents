@@ -1,4 +1,4 @@
-# OpenSpec Copilot Agents
+# OS Agents
 
 Headless CLI for running Hans-led repository teams in parallel. For each feature request, Hans orchestrates five fullstack developer agents - David, Mark, Katy, Mary, and George - each in its own isolated workspace and OpenSpec workflow before Hans drives deliberation, agreement, and final implementation in a dedicated final workspace. Handoff metadata is emitted for GitHub Actions and other CI/CD consumers.
 
@@ -38,7 +38,7 @@ Or make it available as a global command:
 
 ```bash
 npm link
-openspec-agents list
+os-agents list
 ```
 
 Test the packaged CLI in another project from this repository without publishing:
@@ -46,23 +46,23 @@ Test the packaged CLI in another project from this repository without publishing
 ```bash
 npm pack
 cd ../some-other-project
-npm install ../os-agents/eonio-openspec-agents-0.1.0.tgz
-npx openspec-agents list
+npm install ../os-agents/eonio-os-agents-0.1.0.tgz
+npx os-agents list
 ```
 
 ## Configuration
 
-The CLI looks for `openspec-agents.config.yaml`, `openspec-agents.config.yml`, or `openspec-agents.config.json` in the current working directory. It also respects:
+The CLI looks for `os-agents.config.yaml`, `os-agents.config.yml`, or `os-agents.config.json` in the current working directory. It also respects:
 
-- `OPENSPEC_AGENTS_HOME` for the runtime state root
+- `OS_AGENTS_HOME` for the runtime state root
 - `GITHUB_TOKEN` for GitHub API publishing and Copilot authentication
 - `COPILOT_MODEL` for the default SDK model
 
 Example config:
 
 ```yaml
-stateRoot: /srv/openspec-agents
-workspaceRoot: /srv/openspec-agents/workspaces
+stateRoot: /srv/os-agents
+workspaceRoot: /srv/os-agents/workspaces
 
 retention:
   completed: false
@@ -97,7 +97,7 @@ workflow:
 Spawn a Hans-led team against the same repository and base branch:
 
 ```bash
-openspec-agents spawn \
+os-agents spawn \
   --repo owner/repo \
   --branch main \
   --feature "Add billing portal flow" \
@@ -107,18 +107,18 @@ openspec-agents spawn \
 Inspect and recover runs:
 
 ```bash
-openspec-agents list
-openspec-agents status <run-id>
-openspec-agents logs <run-id> --tail 200
-openspec-agents resume <run-id>
-openspec-agents cancel <run-id>
+os-agents list
+os-agents status <run-id>
+os-agents logs <run-id> --tail 200
+os-agents resume <run-id>
+os-agents cancel <run-id>
 ```
 
 Use `--json` on `spawn`, `list`, `status`, `logs`, `cancel`, and `resume` for automation-friendly output. Team-aware status now includes run kind, persona, parent linkage, and final agreement score when available.
 
 ## Runtime layout
 
-By default, runtime data lives under `~/.openspec-agents`:
+By default, runtime data lives under `~/.os-agents`:
 
 - `runs/` - persisted run records
 - `logs/` - per-run logs

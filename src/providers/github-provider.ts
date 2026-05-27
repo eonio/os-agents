@@ -112,7 +112,7 @@ export class GitHubProvider {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${this.config.github.token}`,
           "Content-Type": "application/json",
-          "User-Agent": "openspec-copilot-agents",
+          "User-Agent": "os-agents",
         },
         body: JSON.stringify({
           event_type: this.config.github.dispatchEventType,

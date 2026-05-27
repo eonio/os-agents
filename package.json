@@ -1,7 +1,7 @@
 {
-  "name": "@eonio/openspec-agents",
+  "name": "@eonio/os-agents",
   "version": "0.1.0",
-  "description": "OpenSpec Copilot Agents: headless multi-agent CLI for OpenSpec workflows using the GitHub Copilot SDK.",
+  "description": "OS Agents: headless multi-agent CLI for OpenSpec workflows using the GitHub Copilot SDK.",
   "type": "module",
   "files": [
     "dist",
@@ -9,7 +9,7 @@
     "LICENSE"
   ],
   "bin": {
-    "openspec-agents": "./dist/index.js"
+    "os-agents": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

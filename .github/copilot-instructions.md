@@ -27,4 +27,4 @@
 - Reuse `slugify()`, `makeRunId()`, and `renderTemplate()` from `src/utils/text.ts` for feature slugs, run IDs, feature branches, and workflow command templating. Feature branches are expected to stay in the `copilot/<feature-slug>-...` form.
 - Keep shell and git execution centralized in `src/utils/process.ts`, `WorkspaceManager`, and workflow providers rather than open-coding `child_process.spawn` in new modules.
 - Tests use Vitest and prefer temporary real filesystem/git state through `test/helpers.ts:createTestConfig()` instead of heavy mocking. Follow the existing `test/*.test.ts` style when covering workspace, workflow, or persistence changes.
-- Config loading is intentionally layered: explicit `--config` path first, then `openspec-agents.config.yaml|yml|json` in the current working directory, then environment/default values from `src/config.ts`.
+- Config loading is intentionally layered: explicit `--config` path first, then `os-agents.config.yaml|yml|json` in the current working directory, then environment/default values from `src/config.ts`.

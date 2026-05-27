@@ -50,7 +50,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   const program = new Command();
 
   program
-    .name("openspec-agents")
+    .name("os-agents")
     .description("Headless multi-agent orchestrator for OpenSpec workflows and GitHub Copilot SDK.")
     .option("-c, --config <path>", "Path to a YAML or JSON config file.");
 

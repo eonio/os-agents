@@ -41,7 +41,7 @@ function buildPrompt(run: RunRecord): string {
         ];
 
   return [
-    "You are one of several parallel coding agents managed by OpenSpec Copilot Agents.",
+    "You are one of several parallel coding agents managed by OS Agents.",
     `Current role: ${persona.name} (${persona.title}).`,
     persona.summary,
     `Internal monologue cue: ${persona.internalMonologue}`,

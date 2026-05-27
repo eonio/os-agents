@@ -70,9 +70,9 @@ async function loadConfigFile(configPath?: string): Promise<unknown> {
   }
 
   const candidates = [
-    path.join(process.cwd(), "openspec-agents.config.yaml"),
-    path.join(process.cwd(), "openspec-agents.config.yml"),
-    path.join(process.cwd(), "openspec-agents.config.json"),
+    path.join(process.cwd(), "os-agents.config.yaml"),
+    path.join(process.cwd(), "os-agents.config.yml"),
+    path.join(process.cwd(), "os-agents.config.json"),
   ];
 
   for (const candidate of candidates) {
@@ -96,8 +96,8 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
   const fileConfig = configSchema.parse(await loadConfigFile(configPath));
   const stateRoot =
     fileConfig.stateRoot ??
-    process.env.OPENSPEC_AGENTS_HOME ??
-    path.join(os.homedir(), ".openspec-agents");
+    process.env.OS_AGENTS_HOME ??
+    path.join(os.homedir(), ".os-agents");
 
   const workspaceRoot =
     fileConfig.workspaceRoot ?? path.join(stateRoot, "workspaces");

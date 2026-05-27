@@ -5,6 +5,10 @@
   "type": "module",
   "files": [
     "dist",
+    "scripts",
+    "os-agents.config-example.yaml",
+    "os-agents.config-example.yml",
+    "os-agents.config-example.json",
     "README.md",
     "LICENSE"
   ],
@@ -14,7 +18,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "node ./scripts/postinstall-config-examples.js"
   },
   "keywords": [
     "copilot",

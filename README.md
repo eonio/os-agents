@@ -65,11 +65,17 @@ The CLI looks for `os-agents.config.yaml`, `os-agents.config.yml`, or `os-agents
 - `GITHUB_TOKEN` for GitHub API publishing and Copilot authentication
 - `COPILOT_MODEL` for the default SDK model
 
-Example config:
+After installation, these placeholder example files are copied into the project root if they do not already exist:
+
+- `os-agents.config-example.yaml`
+- `os-agents.config-example.yml`
+- `os-agents.config-example.json`
+
+YAML example:
 
 ```yaml
-stateRoot: /srv/os-agents
-workspaceRoot: /srv/os-agents/workspaces
+stateRoot: "C:/path/to/os-agents"
+workspaceRoot: "C:/path/to/os-agents/workspaces"
 
 retention:
   completed: false
@@ -77,26 +83,108 @@ retention:
   cancelled: true
 
 github:
+  token: "YOUR_GITHUB_TOKEN"
+  apiBaseUrl: "https://api.github.com"
   preferSsh: true
-  dispatchEventType: speckit_orchestrator_handoff
+  dispatchEventType: "speckit_orchestrator_handoff"
 
 copilot:
-  model: gpt-5.4
-  remoteSessionMode: export
+  model: "gpt-5.4"
+  logLevel: "info"
+  baseDirectory: "C:/path/to/os-agents/copilot-home"
+  remoteSessionMode: "export"
 
 workflow:
-  defaultProvider: openspec
+  defaultProvider: "openspec"
 
   openspec:
-    changePrefix: agent
-    createChangeCommand: openspec new change "{changeName}"
-    statusCommand: openspec status --change "{changeName}" --json
-    applyCommand: openspec instructions apply --change "{changeName}" --json
-    handoffCommand: openspec status --change "{changeName}" --json
+    changePrefix: "agent"
+    createChangeCommand: "openspec new change \"{changeName}\""
+    statusCommand: "openspec status --change \"{changeName}\" --json"
+    applyCommand: "openspec instructions apply --change \"{changeName}\" --json"
+    handoffCommand: "openspec status --change \"{changeName}\" --json"
 
   speckit:
-    draftCommand: speckit draft --feature "{feature}" --run-id {runId}
-    handoffCommand: speckit handoff --run-id {runId} --branch {featureBranch}
+    draftCommand: "speckit draft --feature \"{feature}\" --run-id {runId}"
+    handoffCommand: "speckit handoff --run-id {runId} --branch {featureBranch}"
+```
+
+YML example:
+
+```yml
+stateRoot: "C:/path/to/os-agents"
+workspaceRoot: "C:/path/to/os-agents/workspaces"
+
+retention:
+  completed: false
+  failed: true
+  cancelled: true
+
+github:
+  token: "YOUR_GITHUB_TOKEN"
+  apiBaseUrl: "https://api.github.com"
+  preferSsh: true
+  dispatchEventType: "speckit_orchestrator_handoff"
+
+copilot:
+  model: "gpt-5.4"
+  logLevel: "info"
+  baseDirectory: "C:/path/to/os-agents/copilot-home"
+  remoteSessionMode: "export"
+
+workflow:
+  defaultProvider: "openspec"
+
+  openspec:
+    changePrefix: "agent"
+    createChangeCommand: "openspec new change \"{changeName}\""
+    statusCommand: "openspec status --change \"{changeName}\" --json"
+    applyCommand: "openspec instructions apply --change \"{changeName}\" --json"
+    handoffCommand: "openspec status --change \"{changeName}\" --json"
+
+  speckit:
+    draftCommand: "speckit draft --feature \"{feature}\" --run-id {runId}"
+    handoffCommand: "speckit handoff --run-id {runId} --branch {featureBranch}"
+```
+
+JSON example:
+
+```json
+{
+  "stateRoot": "C:/path/to/os-agents",
+  "workspaceRoot": "C:/path/to/os-agents/workspaces",
+  "retention": {
+    "completed": false,
+    "failed": true,
+    "cancelled": true
+  },
+  "github": {
+    "token": "YOUR_GITHUB_TOKEN",
+    "apiBaseUrl": "https://api.github.com",
+    "preferSsh": true,
+    "dispatchEventType": "speckit_orchestrator_handoff"
+  },
+  "copilot": {
+    "model": "gpt-5.4",
+    "logLevel": "info",
+    "baseDirectory": "C:/path/to/os-agents/copilot-home",
+    "remoteSessionMode": "export"
+  },
+  "workflow": {
+    "defaultProvider": "openspec",
+    "openspec": {
+      "changePrefix": "agent",
+      "createChangeCommand": "openspec new change \"{changeName}\"",
+      "statusCommand": "openspec status --change \"{changeName}\" --json",
+      "applyCommand": "openspec instructions apply --change \"{changeName}\" --json",
+      "handoffCommand": "openspec status --change \"{changeName}\" --json"
+    },
+    "speckit": {
+      "draftCommand": "speckit draft --feature \"{feature}\" --run-id {runId}",
+      "handoffCommand": "speckit handoff --run-id {runId} --branch {featureBranch}"
+    }
+  }
+}
 ```
 
 ## Usage

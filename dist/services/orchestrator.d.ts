@@ -27,6 +27,7 @@ export declare class OrchestratorService {
     private buildModerationPrompt;
     private buildPrdPrompt;
     private ensurePhase;
+    private resolveResumePhase;
     private resolveBaseBranch;
     private announce;
 }

@@ -1,4 +1,4 @@
-import type { AppConfig, RunRecord, WorkflowPhase } from "../domain/types.js";
+import type { ActivePhase, AppConfig, RunRecord, WorkflowPhase } from "../domain/types.js";
 export declare class RunStore {
     private readonly config;
     constructor(config: AppConfig);
@@ -8,6 +8,7 @@ export declare class RunStore {
     saveRun(run: RunRecord): Promise<RunRecord>;
     updateRun(runId: string, mutate: (run: RunRecord) => RunRecord | void): Promise<RunRecord>;
     transitionPhase(runId: string, nextPhase: WorkflowPhase, message?: string): Promise<RunRecord>;
+    reopenRun(runId: string, resumePhase: ActivePhase, message?: string): Promise<RunRecord>;
     deleteRun(runId: string): Promise<void>;
     private normalizeRun;
 }

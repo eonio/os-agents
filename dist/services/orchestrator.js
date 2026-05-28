@@ -142,6 +142,10 @@ export class OrchestratorService {
         if (run.phase === "completed") {
             return run;
         }
+        if (run.phase === "failed" || run.phase === "cancelled") {
+            const resumePhase = this.resolveResumePhase(run);
+            await this.store.reopenRun(runId, resumePhase, `Resuming run from ${resumePhase} after ${run.phase}.`);
+        }
         await this.runWorker(runId);
         return this.store.getRun(runId);
     }
@@ -447,6 +451,16 @@ export class OrchestratorService {
         const moved = await this.store.transitionPhase(run.id, targetPhase, `Entering ${targetPhase}.`);
         await work(moved);
         return this.store.getRun(run.id);
+    }
+    resolveResumePhase(run) {
+        const latestActive = [...run.history]
+            .reverse()
+            .find((entry) => entry.phase === "queued" ||
+            entry.phase === "preparing-workspace" ||
+            entry.phase === "drafting-prd" ||
+            entry.phase === "implementing" ||
+            entry.phase === "handoff");
+        return latestActive?.phase ?? "queued";
     }
     async resolveBaseBranch(repositoryPath) {
         try {

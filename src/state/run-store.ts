@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertTransition } from "../domain/workflow.js";
-import type { AppConfig, RunRecord, WorkflowPhase } from "../domain/types.js";
+import type { ActivePhase, AppConfig, RunRecord, WorkflowPhase } from "../domain/types.js";
 
 export class RunStore {
   public constructor(private readonly config: AppConfig) {}
@@ -69,6 +69,21 @@ export class RunStore {
         run.status = nextPhase === "queued" ? "queued" : "running";
         run.startedAt ??= new Date().toISOString();
       }
+    });
+  }
+
+  public async reopenRun(
+    runId: string,
+    resumePhase: ActivePhase,
+    message?: string,
+  ): Promise<RunRecord> {
+    return this.updateRun(runId, (run) => {
+      run.phase = resumePhase;
+      run.status = resumePhase === "queued" ? "queued" : "running";
+      run.completedAt = undefined;
+      run.error = undefined;
+      run.startedAt ??= new Date().toISOString();
+      run.history.push({ phase: resumePhase, at: new Date().toISOString(), message });
     });
   }
 

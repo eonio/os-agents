@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type {
+  ActivePhase,
   AppConfig,
   CouncilContribution,
   PrdDiscussionItem,
@@ -164,6 +165,15 @@ export class OrchestratorService {
     const run = await this.store.getRun(runId);
     if (run.phase === "completed") {
       return run;
+    }
+
+    if (run.phase === "failed" || run.phase === "cancelled") {
+      const resumePhase = this.resolveResumePhase(run);
+      await this.store.reopenRun(
+        runId,
+        resumePhase,
+        `Resuming run from ${resumePhase} after ${run.phase}.`,
+      );
     }
 
     await this.runWorker(runId);
@@ -581,6 +591,20 @@ export class OrchestratorService {
     const moved = await this.store.transitionPhase(run.id, targetPhase, `Entering ${targetPhase}.`);
     await work(moved);
     return this.store.getRun(run.id);
+  }
+
+  private resolveResumePhase(run: RunRecord): ActivePhase {
+    const latestActive = [...run.history]
+      .reverse()
+      .find((entry): entry is { phase: ActivePhase; at: string; message?: string } =>
+        entry.phase === "queued" ||
+        entry.phase === "preparing-workspace" ||
+        entry.phase === "drafting-prd" ||
+        entry.phase === "implementing" ||
+        entry.phase === "handoff",
+      );
+
+    return latestActive?.phase ?? "queued";
   }
 
   private async resolveBaseBranch(repositoryPath: string): Promise<string> {

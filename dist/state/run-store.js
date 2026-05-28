@@ -58,6 +58,16 @@ export class RunStore {
             }
         });
     }
+    async reopenRun(runId, resumePhase, message) {
+        return this.updateRun(runId, (run) => {
+            run.phase = resumePhase;
+            run.status = resumePhase === "queued" ? "queued" : "running";
+            run.completedAt = undefined;
+            run.error = undefined;
+            run.startedAt ??= new Date().toISOString();
+            run.history.push({ phase: resumePhase, at: new Date().toISOString(), message });
+        });
+    }
     async deleteRun(runId) {
         await rm(this.getRunPath(runId), { force: true });
     }

@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { loadConfig } from "./config.js";
 import { OrchestratorService } from "./services/orchestrator.js";
 import type { RunRecord } from "./domain/types.js";
+import { ProjectInitializer } from "./services/project-initializer.js";
 
 function collectFeature(value: string, previous: string[]): string[] {
   previous.push(value);
@@ -9,25 +10,12 @@ function collectFeature(value: string, previous: string[]): string[] {
 }
 
 function formatRun(run: RunRecord): string {
-  const repository =
-    run.repository.owner && run.repository.name
-      ? `${run.repository.owner}/${run.repository.name}`
-      : run.repository.input;
-
   return [
     `${run.id} [${run.status}]`,
-    `  kind: ${run.kind}`,
-    ...(run.personaId ? [`  persona: ${run.personaId}`] : []),
-    ...(run.parentRunId ? [`  parent: ${run.parentRunId}`] : []),
-    `  repo: ${repository}`,
-    `  workflow: ${run.workflow.provider}`,
-    ...(run.workflow.changeName ? [`  change: ${run.workflow.changeName}`] : []),
-    ...(run.team?.finalAgreement
-      ? [`  agreement: ${run.team.finalAgreement.score}/100 (${run.team.finalAgreement.accepted ? "accepted" : "pending"})`]
-      : []),
     `  phase: ${run.phase}`,
     `  base: ${run.baseBranch}`,
     `  branch: ${run.featureBranch}`,
+    `  prd: ${run.prd?.filePath ?? "pending"}`,
     `  workspace: ${run.workspacePath}`,
   ].join("\n");
 }
@@ -48,24 +36,38 @@ function output(data: unknown, asJson: boolean): void {
 
 export async function runCli(argv = process.argv): Promise<void> {
   const program = new Command();
+  const projectInitializer = new ProjectInitializer();
+
+  const loadInitializedConfig = async (configPath?: string) => {
+    await projectInitializer.assertInitialized();
+    return loadConfig(configPath);
+  };
 
   program
     .name("os-agents")
-    .description("Headless multi-agent orchestrator for OpenSpec workflows and GitHub Copilot SDK.")
-    .option("-c, --config <path>", "Path to a YAML or JSON config file.");
+    .description("PRD-first Hans orchestrator for OpenSpec delivery.")
+    .option("-c, --config <path>", "Path to a JSON config file.");
+
+  program
+    .command("init")
+    .description("Prepare the current project folder to run OS Agents.")
+    .action(async (_options, command) => {
+      await projectInitializer.initialize(command.parent?.opts().config);
+      console.log(`OS Agents initialized in ${process.cwd()}.`);
+    });
 
   program
     .command("spawn")
-    .description("Spawn one or more Hans-led feature teams for a repository.")
-    .requiredOption("-r, --repo <repository>", "GitHub owner/repo, URL, or local git path.")
-    .requiredOption("-b, --branch <branch>", "Initial branch cloned for every agent.")
-    .requiredOption("-f, --feature <feature>", "Feature request for an agent.", collectFeature, [])
+    .description("Draft a PRD and implement one or more features from the current project.")
+    .option("-b, --branch <branch>", "Optional base branch override. Defaults to the current branch.")
+    .requiredOption("-f, --feature <feature>", "Feature request for Hans.", collectFeature, [])
     .option("--json", "Emit machine-readable JSON.")
     .action(async (options, command) => {
-      const config = await loadConfig(command.parent?.opts().config);
-      const orchestrator = new OrchestratorService(config);
+      const config = await loadInitializedConfig(command.parent?.opts().config);
+      const orchestrator = new OrchestratorService(config, {
+        liveOutput: !options.json,
+      });
       const result = await orchestrator.spawnRuns({
-        repository: options.repo,
         baseBranch: options.branch,
         features: options.feature,
       });
@@ -78,10 +80,10 @@ export async function runCli(argv = process.argv): Promise<void> {
 
   program
     .command("list")
-    .description("List all known team and developer runs.")
+    .description("List all known runs.")
     .option("--json", "Emit machine-readable JSON.")
     .action(async (options, command) => {
-      const config = await loadConfig(command.parent?.opts().config);
+      const config = await loadInitializedConfig(command.parent?.opts().config);
       const orchestrator = new OrchestratorService(config);
       const runs = await orchestrator.listRuns();
       output(options.json ? runs : runs.map((run) => formatRun(run)), Boolean(options.json));
@@ -89,10 +91,10 @@ export async function runCli(argv = process.argv): Promise<void> {
 
   program
     .command("status [runId]")
-    .description("Show one run or all runs, including team and persona metadata.")
+    .description("Show one run or all runs.")
     .option("--json", "Emit machine-readable JSON.")
     .action(async (runId, options, command) => {
-      const config = await loadConfig(command.parent?.opts().config);
+      const config = await loadInitializedConfig(command.parent?.opts().config);
       const orchestrator = new OrchestratorService(config);
       if (runId) {
         const run = await orchestrator.getRun(runId);
@@ -110,7 +112,7 @@ export async function runCli(argv = process.argv): Promise<void> {
     .option("--tail <lines>", "How many lines to show.", "100")
     .option("--json", "Emit machine-readable JSON.")
     .action(async (runId, options, command) => {
-      const config = await loadConfig(command.parent?.opts().config);
+      const config = await loadInitializedConfig(command.parent?.opts().config);
       const orchestrator = new OrchestratorService(config);
       const lines = await orchestrator.getLogs(runId, Number(options.tail));
       output(options.json ? lines : lines, Boolean(options.json));
@@ -118,10 +120,10 @@ export async function runCli(argv = process.argv): Promise<void> {
 
   program
     .command("cancel <runId>")
-    .description("Cancel a run and stop its worker if it is active.")
+    .description("Cancel a run.")
     .option("--json", "Emit machine-readable JSON.")
     .action(async (runId, options, command) => {
-      const config = await loadConfig(command.parent?.opts().config);
+      const config = await loadInitializedConfig(command.parent?.opts().config);
       const orchestrator = new OrchestratorService(config);
       const run = await orchestrator.cancelRun(runId);
       output(options.json ? run : formatRun(run), Boolean(options.json));
@@ -129,11 +131,13 @@ export async function runCli(argv = process.argv): Promise<void> {
 
   program
     .command("resume <runId>")
-    .description("Resume a run after a restart or worker failure.")
+    .description("Resume a run after an interruption.")
     .option("--json", "Emit machine-readable JSON.")
     .action(async (runId, options, command) => {
-      const config = await loadConfig(command.parent?.opts().config);
-      const orchestrator = new OrchestratorService(config);
+      const config = await loadInitializedConfig(command.parent?.opts().config);
+      const orchestrator = new OrchestratorService(config, {
+        liveOutput: !options.json,
+      });
       const run = await orchestrator.resumeRun(runId);
       output(options.json ? run : formatRun(run), Boolean(options.json));
     });
@@ -142,18 +146,10 @@ export async function runCli(argv = process.argv): Promise<void> {
     .command("cleanup <runId>")
     .description("Apply workspace retention rules to a run immediately.")
     .action(async (runId, _options, command) => {
-      const config = await loadConfig(command.parent?.opts().config);
+      const config = await loadInitializedConfig(command.parent?.opts().config);
       const orchestrator = new OrchestratorService(config);
       await orchestrator.cleanupRun(runId);
       console.log(`Cleanup applied for ${runId}.`);
-    });
-
-  program
-    .command("__run-worker <runId>")
-    .action(async (runId: string, _options: unknown, command: Command) => {
-      const config = await loadConfig(command.parent?.opts().config);
-      const orchestrator = new OrchestratorService(config);
-      await orchestrator.runWorker(runId);
     });
 
   await program.parseAsync(argv);

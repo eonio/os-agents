@@ -67,9 +67,10 @@ export class OpenSpecWorkflowProvider {
             run.workflow.changeDirectory
                 ? `OpenSpec change directory: ${run.workflow.changeDirectory}.`
                 : "OpenSpec change directory will live under openspec/changes/<change-name>.",
-            "Before making code changes, inspect the OpenSpec change state and follow the required artifact/apply workflow.",
+            "Before making code changes, inspect the PRD and the OpenSpec change state.",
             `Use commands such as \`openspec status --change "${changeName}" --json\` and \`openspec instructions apply --change "${changeName}" --json\` to understand what remains.`,
-            "If proposal, design, specs, or tasks are incomplete, update them before finalizing implementation.",
+            `Treat the PRD at "${run.prd?.workspaceFilePath ?? run.prd?.filePath ?? "features/<feature>.md"}" as the source of truth for scope and architecture.`,
+            "If proposal, design, specs, or tasks are incomplete, align them to the PRD before finalizing implementation.",
         ];
     }
     buildChangeName(run) {
@@ -81,7 +82,8 @@ export class OpenSpecWorkflowProvider {
             feature: run.feature,
             featureBranch: run.featureBranch,
             baseBranch: run.baseBranch,
-            repository: run.repository.input,
+            repository: this.config.projectRoot,
+            projectRoot: this.config.projectRoot,
             workspacePath: run.workspacePath,
             changeName,
         });

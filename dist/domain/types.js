@@ -1,7 +1,7 @@
 export const WORKFLOW_PHASES = [
     "queued",
     "preparing-workspace",
-    "drafting-spec",
+    "drafting-prd",
     "implementing",
     "handoff",
     "completed",

@@ -1,18 +1,8 @@
-export declare const WORKFLOW_PHASES: readonly ["queued", "preparing-workspace", "drafting-spec", "implementing", "handoff", "completed", "failed", "cancelled"];
-export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
-export type ActivePhase = Extract<WorkflowPhase, "queued" | "preparing-workspace" | "drafting-spec" | "implementing" | "handoff">;
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type DispatchStatus = "pending" | "published" | "skipped" | "failed";
 export type RemoteSessionMode = "off" | "export" | "on";
-export type WorkflowProviderId = "openspec" | "speckit";
+export type WorkflowProviderId = "openspec";
 export type RunKind = "orchestrator" | "developer";
-export interface RepositoryRef {
-    input: string;
-    cloneUrl: string;
-    owner?: string;
-    name?: string;
-    provider: "github" | "git" | "local";
-}
 export interface PhaseRecord {
     phase: WorkflowPhase;
     at: string;
@@ -46,42 +36,58 @@ export interface PersonaProfile {
     valueFocus: string;
     internalMonologue: string;
 }
-export interface TeamMemberResult {
-    runId: string;
+export interface CouncilContribution {
     personaId: string;
     name: string;
-    status: RunStatus;
-    summary?: string;
-    changeName?: string;
-}
-export interface TeamVote {
-    personaId: string;
-    name: string;
-    score: number;
-    rationale: string;
-}
-export interface TeamAgreement {
-    round: number;
-    score: number;
-    accepted: boolean;
+    itemId: string;
+    itemTitle: string;
+    round: 1 | 2;
     summary: string;
-    votes: TeamVote[];
-    strategy: "individual" | "merge";
-    selectedPersonaId?: string;
-    selectedPersonaName?: string;
+    content: string;
+}
+export interface TeamMemberResult {
+    personaId: string;
+    name: string;
+    contributionCount: number;
+    summary?: string;
+}
+export interface CouncilDecision {
+    itemId: string;
+    itemTitle: string;
+    roundsUsed: 1 | 2;
+    summary: string;
+    followUpPrompt?: string;
 }
 export interface TeamState {
     orchestratorName: string;
-    developerRunIds: string[];
     memberResults: TeamMemberResult[];
-    deliberationRounds: TeamAgreement[];
-    finalAgreement?: TeamAgreement;
-    finalWorkspacePath?: string;
+    contributions: CouncilContribution[];
+    decisions: CouncilDecision[];
+}
+export interface PrdDiscussionItem {
+    id: string;
+    title: string;
+    prompt: string;
+    maxRounds: 2;
+    roundsCompleted: 0 | 1 | 2;
+    resolution?: string;
+    followUpPrompt?: string;
+}
+export interface PrdState {
+    title?: string;
+    version?: string;
+    date?: string;
+    filePath?: string;
+    workspaceFilePath?: string;
+    synopsis?: string;
+    finalDocument?: string;
+    discussionItems: PrdDiscussionItem[];
 }
 export interface HandoffArtifact {
     runId: string;
     kind: RunKind;
-    repository: string;
+    projectRoot: string;
+    githubRepository?: string;
     baseBranch: string;
     featureBranch: string;
     feature: string;
@@ -97,11 +103,11 @@ export interface HandoffArtifact {
     personaId?: string;
     workflow: WorkflowState;
     team?: TeamState;
+    prd?: PrdState;
 }
 export interface RunRecord {
     id: string;
     kind: RunKind;
-    repository: RepositoryRef;
     baseBranch: string;
     feature: string;
     featureSlug: string;
@@ -124,16 +130,13 @@ export interface RunRecord {
     integration: IntegrationState;
     workflow: WorkflowState;
     team?: TeamState;
+    prd?: PrdState;
     history: PhaseRecord[];
 }
 export interface RetentionPolicy {
     completed: boolean;
     failed: boolean;
     cancelled: boolean;
-}
-export interface SpeckitConfig {
-    draftCommand: string;
-    handoffCommand: string;
 }
 export interface OpenSpecConfig {
     changePrefix: string;
@@ -143,9 +146,7 @@ export interface OpenSpecConfig {
     handoffCommand: string;
 }
 export interface WorkflowConfig {
-    defaultProvider: WorkflowProviderId;
     openspec: OpenSpecConfig;
-    speckit: SpeckitConfig;
 }
 export interface GitHubConfig {
     token?: string;
@@ -160,21 +161,25 @@ export interface CopilotConfig {
     remoteSessionMode: RemoteSessionMode;
 }
 export interface AppConfig {
+    projectRoot: string;
     stateRoot: string;
     workspaceRoot: string;
     runsRoot: string;
     logsRoot: string;
     handoffsRoot: string;
+    featuresRoot: string;
     retention: RetentionPolicy;
     workflow: WorkflowConfig;
     github: GitHubConfig;
     copilot: CopilotConfig;
 }
 export interface SpawnRequest {
-    repository: string;
-    baseBranch: string;
+    baseBranch?: string;
     features: string[];
 }
 export interface SpawnResult {
     runs: RunRecord[];
 }
+export declare const WORKFLOW_PHASES: readonly ["queued", "preparing-workspace", "drafting-prd", "implementing", "handoff", "completed", "failed", "cancelled"];
+export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
+export type ActivePhase = Extract<WorkflowPhase, "queued" | "preparing-workspace" | "drafting-prd" | "implementing" | "handoff">;

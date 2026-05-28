@@ -1,7 +1,8 @@
 import { approveAll, CopilotClient, type SessionEvent } from "@github/copilot-sdk";
 import type { AppConfig, RunRecord } from "../domain/types.js";
 import { RunLogger } from "../state/run-logger.js";
-import { HANS_PROFILE, getDeveloperPersona } from "../team/personas.js";
+import { HANS_PROFILE } from "../team/personas.js";
+import { createWorkflowProvider } from "../workflows/index.js";
 
 const DEFAULT_MODEL = "gpt-5.4";
 
@@ -13,72 +14,6 @@ export function isAuthorizationError(error: unknown): boolean {
 export function isModelUnavailableError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes('Model "') && message.includes('" is not available');
-}
-
-function buildPrompt(run: RunRecord): string {
-  const repositoryLabel =
-    run.repository.owner && run.repository.name
-      ? `${run.repository.owner}/${run.repository.name}`
-      : run.repository.input;
-
-  const persona =
-    run.kind === "developer" && run.personaId ? getDeveloperPersona(run.personaId) : HANS_PROFILE;
-
-  const teamLines =
-    run.kind === "orchestrator"
-      ? [
-          "Team mode: Hans final implementation.",
-          ...(run.team?.memberResults.length
-            ? ["Developer results:", ...run.team.memberResults.map((member) => `- ${member.name}: ${member.summary ?? "No summary."}`)]
-            : []),
-          ...(run.team?.finalAgreement
-            ? [
-                "Accepted team agreement:",
-                run.team.finalAgreement.summary,
-                `Agreement score: ${run.team.finalAgreement.score}/100.`,
-                `Agreement strategy: ${run.team.finalAgreement.strategy}.`,
-                ...(run.team.finalAgreement.selectedPersonaName
-                  ? [`Fallback source: ${run.team.finalAgreement.selectedPersonaName}.`]
-                  : []),
-              ]
-            : []),
-        ]
-      : [
-          `You are ${persona.name}, one of five parallel fullstack developers on Hans's team.`,
-          `Persona title: ${persona.title}.`,
-          `Working style: ${persona.style}`,
-          `Contribution focus: ${persona.valueFocus}`,
-          `Humorous internal monologue: ${persona.internalMonologue}`,
-          "You still explore and contribute as a fullstack developer, not as a narrow specialist.",
-        ];
-
-  return [
-    "You are one of several parallel coding agents managed by OS Agents.",
-    `Current role: ${persona.name} (${persona.title}).`,
-    persona.summary,
-    `Internal monologue cue: ${persona.internalMonologue}`,
-    `Repository: ${repositoryLabel}`,
-    `Workspace: ${run.workspacePath}`,
-    `Base branch: ${run.baseBranch}`,
-    `Feature branch: ${run.featureBranch}`,
-    `Feature request: ${run.feature}`,
-    "",
-    "Required workflow:",
-    "1. Inspect the repository in the workspace and understand the feature scope.",
-    `2. Follow the ${run.workflow.provider} workflow artifacts or commands already prepared in the repository.`,
-    "3. Implement only the assigned feature in this workspace.",
-    "4. Leave the repository on the feature branch with local changes committed only if explicitly requested by the operator.",
-    "5. End with a concise handoff containing changed files, important decisions, and suggested next steps for CI/CD.",
-    "",
-    ...teamLines,
-    "",
-    `Workflow provider: ${run.workflow.provider}`,
-    ...(run.workflow.changeName ? [`Workflow change: ${run.workflow.changeName}`] : []),
-    ...(run.workflow.changeDirectory ? [`Workflow change directory: ${run.workflow.changeDirectory}`] : []),
-    ...(run.workflow.lastStatusSummary ? [`Workflow status: ${run.workflow.lastStatusSummary}`] : []),
-    "",
-    "Never modify files outside the provided workspace.",
-  ].join("\n");
 }
 
 function describeEvent(event: SessionEvent): string | undefined {
@@ -98,16 +33,59 @@ function describeEvent(event: SessionEvent): string | undefined {
   }
 }
 
+function buildImplementationPrompt(config: AppConfig, run: RunRecord): string {
+  const workflowProvider = createWorkflowProvider(config, run);
+
+  return [
+    "You are Hans, the OS Agents orchestrator and AI builder expert.",
+    `Project root: ${config.projectRoot}`,
+    `Workspace: ${run.workspacePath}`,
+    `Base branch: ${run.baseBranch}`,
+    `Feature branch: ${run.featureBranch}`,
+    `Feature request: ${run.feature}`,
+    "",
+    "The council phase is complete.",
+    `Final PRD path: ${run.prd?.workspaceFilePath ?? run.prd?.filePath ?? "missing"}`,
+    `PRD title: ${run.prd?.title ?? run.feature}`,
+    `PRD version: ${run.prd?.version ?? "1.0.0"}`,
+    `PRD date: ${run.prd?.date ?? "unknown"}`,
+    ...(run.prd?.synopsis ? [`PRD synopsis: ${run.prd.synopsis}`] : []),
+    "",
+    "Implementation rules:",
+    "1. Read the PRD before changing code.",
+    "2. Use the OpenSpec workflow artifacts prepared in this workspace.",
+    "3. Implement only what the PRD approves.",
+    "4. Keep the project on the feature branch.",
+    "5. End with a concise implementation handoff listing changed files, key decisions, and next steps.",
+    "",
+    ...workflowProvider.buildPromptContext(run),
+    "",
+    `Current role: ${HANS_PROFILE.name} (${HANS_PROFILE.title}).`,
+    HANS_PROFILE.summary,
+    `Operating style: ${HANS_PROFILE.style}`,
+    `Decision focus: ${HANS_PROFILE.valueFocus}`,
+    "",
+    "Never modify files outside the provided workspace.",
+  ].join("\n");
+}
+
 export class CopilotProvider {
   public constructor(private readonly config: AppConfig) {}
 
   private async runSession(
     run: RunRecord,
     logger: RunLogger,
-    options: { gitHubToken?: string; useLoggedInUser: boolean; model: string },
+    options: {
+      prompt: string;
+      sessionId: string;
+      resumeSessionId?: string;
+      gitHubToken?: string;
+      useLoggedInUser: boolean;
+      model: string;
+    },
   ): Promise<{
     sessionId: string;
-    summary?: string;
+    response?: string;
   }> {
     const client = new CopilotClient({
       workingDirectory: run.workspacePath,
@@ -122,7 +100,7 @@ export class CopilotProvider {
 
     try {
       const sessionConfig = {
-      model: options.model,
+        model: options.model,
         workingDirectory: run.workspacePath,
         onPermissionRequest: approveAll,
         streaming: true,
@@ -131,10 +109,10 @@ export class CopilotProvider {
         infiniteSessions: { enabled: true },
       } as const;
 
-      const session = run.integration.copilotSessionId
-        ? await client.resumeSession(run.integration.copilotSessionId, sessionConfig)
+      const session = options.resumeSessionId
+        ? await client.resumeSession(options.resumeSessionId, sessionConfig)
         : await client.createSession({
-            sessionId: run.id,
+            sessionId: options.sessionId,
             ...sessionConfig,
           });
 
@@ -145,25 +123,37 @@ export class CopilotProvider {
         }
       });
 
-      const finalMessage = await session.sendAndWait({ prompt: buildPrompt(run) }, 30 * 60 * 1000);
-      const summary = finalMessage?.data.content?.trim();
+      const finalMessage = await session.sendAndWait(
+        { prompt: options.prompt },
+        30 * 60 * 1000,
+      );
+      const response = finalMessage?.data.content?.trim();
 
       await session.disconnect();
       return {
         sessionId: session.sessionId,
-        summary,
+        response,
       };
     } finally {
       await client.stop();
     }
   }
 
-  public async implement(run: RunRecord, logger: RunLogger): Promise<{
+  public async sendPrompt(
+    run: RunRecord,
+    logger: RunLogger,
+    prompt: string,
+    sessionId: string,
+    resumeSessionId?: string,
+  ): Promise<{
     sessionId: string;
-    summary?: string;
+    response?: string;
   }> {
     try {
       return await this.runSession(run, logger, {
+        prompt,
+        sessionId,
+        resumeSessionId,
         gitHubToken: this.config.github.token,
         useLoggedInUser: !this.config.github.token,
         model: this.config.copilot.model,
@@ -175,20 +165,23 @@ export class CopilotProvider {
         );
 
         return this.runSession(run, logger, {
+          prompt,
+          sessionId,
+          resumeSessionId,
           useLoggedInUser: true,
           model: this.config.copilot.model,
         });
       }
 
-      if (
-        this.config.copilot.model !== DEFAULT_MODEL &&
-        isModelUnavailableError(error)
-      ) {
+      if (this.config.copilot.model !== DEFAULT_MODEL && isModelUnavailableError(error)) {
         await logger.log(
           `Configured Copilot model "${this.config.copilot.model}" is unavailable; retrying with "${DEFAULT_MODEL}".`,
         );
 
         return this.runSession(run, logger, {
+          prompt,
+          sessionId,
+          resumeSessionId,
           gitHubToken: this.config.github.token,
           useLoggedInUser: !this.config.github.token,
           model: DEFAULT_MODEL,
@@ -197,5 +190,26 @@ export class CopilotProvider {
 
       throw error;
     }
+  }
+
+  public async implement(
+    run: RunRecord,
+    logger: RunLogger,
+  ): Promise<{
+    sessionId: string;
+    summary?: string;
+  }> {
+    const result = await this.sendPrompt(
+      run,
+      logger,
+      buildImplementationPrompt(this.config, run),
+      run.id,
+      run.integration.copilotSessionId,
+    );
+
+    return {
+      sessionId: result.sessionId,
+      summary: result.response,
+    };
   }
 }

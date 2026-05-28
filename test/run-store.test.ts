@@ -10,13 +10,6 @@ describe("RunStore", () => {
     await store.saveRun({
       id: "run-1",
       kind: "orchestrator",
-      repository: {
-        input: "owner/repo",
-        cloneUrl: "https://github.com/owner/repo.git",
-        owner: "owner",
-        name: "repo",
-        provider: "github",
-      },
       baseBranch: "main",
       feature: "Add API",
       featureSlug: "add-api",
@@ -38,15 +31,23 @@ describe("RunStore", () => {
       },
       team: {
         orchestratorName: "Hans",
-        developerRunIds: [],
         memberResults: [],
-        deliberationRounds: [],
+        contributions: [],
+        decisions: [],
+      },
+      prd: {
+        title: "Add API",
+        version: "1.0.0",
+        date: "2026-05-28",
+        filePath: `${config.featuresRoot}/add-api-v1.0.0-2026-05-28.md`,
+        discussionItems: [],
       },
       history: [{ phase: "queued", at: new Date().toISOString() }],
     });
 
     const reloaded = await store.getRun("run-1");
     expect(reloaded.feature).toBe("Add API");
+    expect(reloaded.prd?.title).toBe("Add API");
     expect((await store.listRuns())).toHaveLength(1);
   });
 });

@@ -96,9 +96,17 @@ export class RunStore {
         dispatchResponse: legacyProvider?.dispatchResponse,
       },
       workflow: run.workflow ?? {
-        provider: this.config.workflow.defaultProvider,
+        provider: "openspec",
       },
-      team: run.team,
+      team: run.team ?? {
+        orchestratorName: "Hans",
+        memberResults: [],
+        contributions: [],
+        decisions: [],
+      },
+      prd: run.prd ?? {
+        discussionItems: [],
+      },
     };
   }
 }

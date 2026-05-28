@@ -6,4 +6,6 @@ export declare class WorkspaceManager {
     prepareWorkspaceAt(run: RunRecord, workspacePath: string): Promise<RunRecord>;
     cleanup(run: RunRecord): Promise<void>;
     getWorkspacePath(runId: string): string;
+    private isGitRepository;
+    private hasCommitHistory;
 }

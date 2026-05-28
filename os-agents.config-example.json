@@ -1,6 +1,4 @@
 {
-  "stateRoot": "C:/path/to/os-agents",
-  "workspaceRoot": "C:/path/to/os-agents/workspaces",
   "retention": {
     "completed": false,
     "failed": true,
@@ -9,17 +7,15 @@
   "github": {
     "token": "YOUR_GITHUB_TOKEN",
     "apiBaseUrl": "https://api.github.com",
-    "dispatchEventType": "openspec_orchestrator_handoff",
-    "preferSsh": true
+    "preferSsh": true,
+    "dispatchEventType": "openspec_orchestrator_handoff"
   },
   "copilot": {
     "model": "gpt-5.4",
     "logLevel": "info",
-    "baseDirectory": "C:/path/to/os-agents/copilot-home",
     "remoteSessionMode": "export"
   },
   "workflow": {
-    "defaultProvider": "openspec",
     "openspec": {
       "changePrefix": "agent",
       "createChangeCommand": "openspec new change \"{changeName}\"",

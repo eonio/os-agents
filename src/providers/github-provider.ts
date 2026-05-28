@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AppConfig, HandoffArtifact, RepositoryRef, RunRecord } from "../domain/types.js";
+import type { AppConfig, HandoffArtifact, RunRecord } from "../domain/types.js";
 import { execFile } from "../utils/process.js";
 
 function parseGitHubRepository(input: string): { owner: string; name: string } | undefined {
@@ -9,9 +9,7 @@ function parseGitHubRepository(input: string): { owner: string; name: string } |
     return { owner: ownerRepoMatch[1], name: ownerRepoMatch[2].replace(/\.git$/, "") };
   }
 
-  const urlMatch = input.match(
-    /github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/)?$/i,
-  );
+  const urlMatch = input.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/)?$/i);
   if (urlMatch) {
     return { owner: urlMatch[1], name: urlMatch[2] };
   }
@@ -22,46 +20,16 @@ function parseGitHubRepository(input: string): { owner: string; name: string } |
 export class GitHubProvider {
   public constructor(private readonly config: AppConfig) {}
 
-  public resolveRepository(input: string): RepositoryRef {
-    const parsed = parseGitHubRepository(input);
-    if (parsed) {
-      const cloneUrl = this.config.github.preferSsh
-        ? `git@github.com:${parsed.owner}/${parsed.name}.git`
-        : `https://github.com/${parsed.owner}/${parsed.name}.git`;
-      return {
-        input,
-        cloneUrl,
-        owner: parsed.owner,
-        name: parsed.name,
-        provider: "github",
-      };
-    }
-
-    if (input.startsWith("git@") || input.startsWith("http://") || input.startsWith("https://")) {
-      return {
-        input,
-        cloneUrl: input,
-        provider: "git",
-      };
-    }
-
-    return {
-      input,
-      cloneUrl: input,
-      provider: "local",
-    };
-  }
-
   public async buildHandoff(run: RunRecord): Promise<HandoffArtifact> {
-    const effectiveWorkspacePath = run.team?.finalWorkspacePath ?? run.workspacePath;
+    const effectiveWorkspacePath = run.workspacePath;
     const commitSha = await this.resolveCommitSha(effectiveWorkspacePath);
+    const repository = await this.resolveGitHubRepository(effectiveWorkspacePath);
+
     return {
       runId: run.id,
       kind: run.kind,
-      repository:
-        run.repository.owner && run.repository.name
-          ? `${run.repository.owner}/${run.repository.name}`
-          : run.repository.input,
+      projectRoot: this.config.projectRoot,
+      githubRepository: repository ? `${repository.owner}/${repository.name}` : undefined,
       baseBranch: run.baseBranch,
       featureBranch: run.featureBranch,
       feature: run.feature,
@@ -77,6 +45,7 @@ export class GitHubProvider {
       personaId: run.personaId,
       workflow: run.workflow,
       team: run.team,
+      prd: run.prd,
     };
   }
 
@@ -89,11 +58,12 @@ export class GitHubProvider {
 
   public async publishHandoff(run: RunRecord): Promise<{ status: string; detail: string }> {
     const handoff = await this.writeHandoff(run);
+    const repository = await this.resolveGitHubRepository(run.workspacePath);
 
-    if (!run.repository.owner || !run.repository.name) {
+    if (!repository) {
       return {
         status: "skipped",
-        detail: "Repository is not a GitHub owner/repo target; repository_dispatch was skipped.",
+        detail: "No GitHub origin remote was found; repository_dispatch was skipped.",
       };
     }
 
@@ -105,7 +75,7 @@ export class GitHubProvider {
     }
 
     const response = await fetch(
-      `${this.config.github.apiBaseUrl}/repos/${run.repository.owner}/${run.repository.name}/dispatches`,
+      `${this.config.github.apiBaseUrl}/repos/${repository.owner}/${repository.name}/dispatches`,
       {
         method: "POST",
         headers: {
@@ -130,8 +100,26 @@ export class GitHubProvider {
 
     return {
       status: "published",
-      detail: `Published ${this.config.github.dispatchEventType} to ${run.repository.owner}/${run.repository.name}.`,
+      detail: `Published ${this.config.github.dispatchEventType} to ${repository.owner}/${repository.name}.`,
     };
+  }
+
+  private async resolveGitHubRepository(
+    workspacePath: string,
+  ): Promise<{ owner: string; name: string } | undefined> {
+    for (const candidate of [workspacePath, this.config.projectRoot]) {
+      try {
+        const result = await execFile("git", ["remote", "get-url", "origin"], { cwd: candidate });
+        const parsed = parseGitHubRepository(result.stdout.trim());
+        if (parsed) {
+          return parsed;
+        }
+      } catch {
+        // Keep checking the next candidate.
+      }
+    }
+
+    return undefined;
   }
 
   private async resolveCommitSha(workspacePath: string): Promise<string | undefined> {

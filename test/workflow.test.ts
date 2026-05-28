@@ -4,6 +4,7 @@ import { assertTransition, canTransition } from "../src/domain/workflow.js";
 describe("workflow transitions", () => {
   it("allows ordered transitions", () => {
     expect(canTransition("queued", "preparing-workspace")).toBe(true);
+    expect(canTransition("preparing-workspace", "drafting-prd")).toBe(true);
     expect(canTransition("implementing", "handoff")).toBe(true);
   });
 

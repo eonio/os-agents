@@ -1,12 +1,16 @@
 import type { AppConfig, RunRecord, SpawnRequest, SpawnResult } from "../domain/types.js";
 export declare class OrchestratorService {
     private readonly config;
+    private readonly options;
     private readonly store;
     private readonly github;
     private readonly workspaceManager;
     private readonly copilot;
     private readonly deliberation;
-    constructor(config: AppConfig);
+    private readonly prd;
+    constructor(config: AppConfig, options?: {
+        liveOutput?: boolean;
+    });
     spawnRuns(request: SpawnRequest): Promise<SpawnResult>;
     listRuns(): Promise<RunRecord[]>;
     getRun(runId: string): Promise<RunRecord>;
@@ -16,13 +20,13 @@ export declare class OrchestratorService {
     cleanupRun(runId: string): Promise<void>;
     runWorker(runId: string): Promise<void>;
     private runHansWorker;
-    private runDeveloperWorker;
+    private runCouncilLoop;
+    private collectContributions;
+    private moderateItem;
+    private buildContributionPrompt;
+    private buildModerationPrompt;
+    private buildPrdPrompt;
     private ensurePhase;
-    private launchWorker;
-    private spawnDeveloperRuns;
-    private waitForDeveloperRuns;
-    private getDeveloperRuns;
-    private getFinalWorkspacePath;
-    private prepareFinalImplementationRun;
-    private getFinalImplementationRun;
+    private resolveBaseBranch;
+    private announce;
 }

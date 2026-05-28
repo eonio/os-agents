@@ -1,14 +1,10 @@
 import { mkdir, readFile, stat } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import type { AppConfig } from "./domain/types.js";
 
 const configSchema = z
   .object({
-    stateRoot: z.string().optional(),
-    workspaceRoot: z.string().optional(),
     retention: z
       .object({
         completed: z.boolean().optional(),
@@ -18,19 +14,12 @@ const configSchema = z
       .optional(),
     workflow: z
       .object({
-        defaultProvider: z.enum(["openspec", "speckit"]).optional(),
         openspec: z
           .object({
             changePrefix: z.string().optional(),
             createChangeCommand: z.string().optional(),
             statusCommand: z.string().optional(),
             applyCommand: z.string().optional(),
-            handoffCommand: z.string().optional(),
-          })
-          .optional(),
-        speckit: z
-          .object({
-            draftCommand: z.string().optional(),
             handoffCommand: z.string().optional(),
           })
           .optional(),
@@ -65,56 +54,53 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 async function loadConfigFile(configPath?: string): Promise<unknown> {
-  if (configPath && (await fileExists(configPath))) {
-    return parseConfigDocument(configPath, await readFile(configPath, "utf8"));
+  if (configPath) {
+    if (!configPath.endsWith(".json")) {
+      throw new Error("OS Agents now supports JSON config files only.");
+    }
+
+    if (await fileExists(configPath)) {
+      return JSON.parse(await readFile(configPath, "utf8"));
+    }
+
+    throw new Error(`Config file not found: ${configPath}`);
   }
 
-  const candidates = [
-    path.join(process.cwd(), "os-agents.config.yaml"),
-    path.join(process.cwd(), "os-agents.config.yml"),
-    path.join(process.cwd(), "os-agents.config.json"),
-  ];
-
-  for (const candidate of candidates) {
-    if (await fileExists(candidate)) {
-      return parseConfigDocument(candidate, await readFile(candidate, "utf8"));
-    }
+  const candidate = path.join(process.cwd(), "os-agents.config.json");
+  if (await fileExists(candidate)) {
+    return JSON.parse(await readFile(candidate, "utf8"));
   }
 
   return {};
 }
 
-function parseConfigDocument(configPath: string, document: string): unknown {
-  if (configPath.endsWith(".json")) {
-    return JSON.parse(document);
-  }
-
-  return parseYaml(document);
-}
-
 export async function loadConfig(configPath?: string): Promise<AppConfig> {
   const fileConfig = configSchema.parse(await loadConfigFile(configPath));
+  const projectRoot = process.cwd();
   const stateRoot =
-    fileConfig.stateRoot ??
-    process.env.OS_AGENTS_HOME ??
-    path.join(os.homedir(), ".os-agents");
-
-  const workspaceRoot =
-    fileConfig.workspaceRoot ?? path.join(stateRoot, "workspaces");
+    process.env.OS_AGENTS_HOME ?? path.join(projectRoot, ".os-agents");
+  const workspaceRoot = path.join(stateRoot, "workspaces");
+  const runsRoot = path.join(stateRoot, "runs");
+  const logsRoot = path.join(stateRoot, "logs");
+  const handoffsRoot = path.join(stateRoot, "handoffs");
+  const featuresRoot = path.join(projectRoot, "features");
+  const baseDirectory =
+    fileConfig.copilot?.baseDirectory ?? path.join(stateRoot, "copilot-home");
 
   const config: AppConfig = {
+    projectRoot,
     stateRoot,
     workspaceRoot,
-    runsRoot: path.join(stateRoot, "runs"),
-    logsRoot: path.join(stateRoot, "logs"),
-    handoffsRoot: path.join(stateRoot, "handoffs"),
+    runsRoot,
+    logsRoot,
+    handoffsRoot,
+    featuresRoot,
     retention: {
       completed: fileConfig.retention?.completed ?? false,
       failed: fileConfig.retention?.failed ?? true,
       cancelled: fileConfig.retention?.cancelled ?? true,
     },
     workflow: {
-      defaultProvider: fileConfig.workflow?.defaultProvider ?? "openspec",
       openspec: {
         changePrefix: fileConfig.workflow?.openspec?.changePrefix ?? "agent",
         createChangeCommand:
@@ -130,14 +116,6 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
           fileConfig.workflow?.openspec?.handoffCommand ??
           'openspec status --change "{changeName}" --json',
       },
-      speckit: {
-        draftCommand:
-          fileConfig.workflow?.speckit?.draftCommand ??
-          'speckit draft --feature "{feature}" --run-id {runId}',
-        handoffCommand:
-          fileConfig.workflow?.speckit?.handoffCommand ??
-          'speckit handoff --run-id {runId} --branch {featureBranch}',
-      },
     },
     github: {
       token: fileConfig.github?.token ?? process.env.GITHUB_TOKEN,
@@ -149,8 +127,7 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
     copilot: {
       model: fileConfig.copilot?.model ?? process.env.COPILOT_MODEL ?? "gpt-5.4",
       logLevel: fileConfig.copilot?.logLevel ?? "info",
-      baseDirectory:
-        fileConfig.copilot?.baseDirectory ?? path.join(stateRoot, "copilot-home"),
+      baseDirectory,
       remoteSessionMode: fileConfig.copilot?.remoteSessionMode ?? "export",
     },
   };
@@ -161,6 +138,7 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
     mkdir(config.runsRoot, { recursive: true }),
     mkdir(config.logsRoot, { recursive: true }),
     mkdir(config.handoffsRoot, { recursive: true }),
+    mkdir(config.featuresRoot, { recursive: true }),
     mkdir(config.copilot.baseDirectory, { recursive: true }),
   ]);
 

@@ -3,10 +3,10 @@ import type { ActivePhase, WorkflowPhase } from "./types.js";
 const ORDERED_ACTIVE_PHASES: ActivePhase[] = [
   "queued",
   "preparing-workspace",
-  "drafting-spec",
+  "drafting-prd",
   "implementing",
   "handoff",
-];
+] as const;
 
 export function isTerminalPhase(phase: WorkflowPhase): boolean {
   return phase === "completed" || phase === "failed" || phase === "cancelled";

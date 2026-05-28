@@ -1,8 +1,12 @@
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
-import type { AppConfig, RunRecord, SpawnRequest, SpawnResult, TeamAgreement } from "../domain/types.js";
+import { z } from "zod";
+import type {
+  AppConfig,
+  CouncilContribution,
+  PrdDiscussionItem,
+  RunRecord,
+  SpawnRequest,
+  SpawnResult,
+} from "../domain/types.js";
 import { RunLogger } from "../state/run-logger.js";
 import { RunStore } from "../state/run-store.js";
 import { GitHubProvider } from "../providers/github-provider.js";
@@ -12,10 +16,31 @@ import { makeRunId, slugify } from "../utils/text.js";
 import { createWorkflowProvider } from "../workflows/index.js";
 import { DEVELOPER_PERSONAS, HANS_PROFILE } from "../team/personas.js";
 import { TeamDeliberationService } from "./team-deliberation.js";
+import { PrdService } from "./prd-service.js";
+import { execFile } from "../utils/process.js";
 
-const sourceEntryPath = fileURLToPath(new URL("../index.ts", import.meta.url));
-const builtEntryPath = fileURLToPath(new URL("../index.js", import.meta.url));
-const MAX_DELIBERATION_ROUNDS = 3;
+const MODERATION_RESPONSE_SCHEMA = z.object({
+  summary: z.string().min(1),
+  requiresFollowUp: z.boolean().default(false),
+  followUpPrompt: z.string().optional(),
+});
+
+function extractLastJsonBlock(output: string): string {
+  const start = output.indexOf("{");
+  const end = output.lastIndexOf("}");
+  if (start < 0 || end < start) {
+    throw new Error(`Expected JSON output from Hans, received: ${output}`);
+  }
+
+  return output.slice(start, end + 1);
+}
+
+function shorten(message: string, maxLength = 140): string {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
 
 export class OrchestratorService {
   private readonly store: RunStore;
@@ -23,61 +48,93 @@ export class OrchestratorService {
   private readonly workspaceManager: WorkspaceManager;
   private readonly copilot: CopilotProvider;
   private readonly deliberation: TeamDeliberationService;
+  private readonly prd: PrdService;
 
-  public constructor(private readonly config: AppConfig) {
+  public constructor(
+    private readonly config: AppConfig,
+    private readonly options: { liveOutput?: boolean } = {},
+  ) {
     this.store = new RunStore(config);
     this.github = new GitHubProvider(config);
     this.workspaceManager = new WorkspaceManager(config);
     this.copilot = new CopilotProvider(config);
     this.deliberation = new TeamDeliberationService();
+    this.prd = new PrdService(config);
   }
 
   public async spawnRuns(request: SpawnRequest): Promise<SpawnResult> {
-    const repository = this.github.resolveRepository(request.repository);
+    const baseBranch = request.baseBranch ?? (await this.resolveBaseBranch(this.config.projectRoot));
     const runs: RunRecord[] = [];
 
     for (const feature of request.features) {
       const runId = makeRunId(feature);
       const featureSlug = slugify(feature) || "feature";
+      const timestamp = new Date().toISOString();
       const run: RunRecord = {
         id: runId,
         kind: "orchestrator",
-        repository,
-        baseBranch: request.baseBranch,
+        baseBranch,
         feature,
         featureSlug,
         featureBranch: `copilot/${featureSlug}-${runId.slice(-8)}`,
         workspacePath: this.workspaceManager.getWorkspacePath(runId),
-        logPath: path.join(this.config.logsRoot, `${runId}.log`),
-        handoffPath: path.join(this.config.handoffsRoot, `${runId}.json`),
+        logPath: `${this.config.logsRoot}\\${runId}.log`,
+        handoffPath: `${this.config.handoffsRoot}\\${runId}.json`,
         status: "queued",
         phase: "queued",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
         cancellationRequested: false,
         integration: {
           remoteSessionMode: this.config.copilot.remoteSessionMode,
           dispatchStatus: "pending",
         },
         workflow: {
-          provider: this.config.workflow.defaultProvider,
+          provider: "openspec",
         },
         team: {
           orchestratorName: HANS_PROFILE.name,
-          developerRunIds: [],
           memberResults: [],
-          deliberationRounds: [],
+          contributions: [],
+          decisions: [],
         },
-        history: [{ phase: "queued", at: new Date().toISOString(), message: "Run created." }],
+        prd: this.prd.createInitialState({
+          id: runId,
+          kind: "orchestrator",
+          baseBranch,
+          feature,
+          featureSlug,
+          featureBranch: `copilot/${featureSlug}-${runId.slice(-8)}`,
+          workspacePath: this.workspaceManager.getWorkspacePath(runId),
+          logPath: `${this.config.logsRoot}\\${runId}.log`,
+          handoffPath: `${this.config.handoffsRoot}\\${runId}.json`,
+          status: "queued",
+          phase: "queued",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          cancellationRequested: false,
+          integration: {
+            remoteSessionMode: this.config.copilot.remoteSessionMode,
+            dispatchStatus: "pending",
+          },
+          workflow: {
+            provider: "openspec",
+          },
+          team: {
+            orchestratorName: HANS_PROFILE.name,
+            memberResults: [],
+            contributions: [],
+            decisions: [],
+          },
+          history: [],
+        }),
+        history: [{ phase: "queued", at: timestamp, message: "Run created." }],
       };
 
       await this.store.saveRun(run);
-      const pid = await this.launchWorker(run.id);
-      const updated = await this.store.updateRun(run.id, (record) => {
-        record.pid = pid;
-        record.status = "running";
-      });
-      runs.push(updated);
+      this.announce(`Run ${run.id} started.`);
+      await this.runWorker(run.id);
+      runs.push(await this.store.getRun(run.id));
     }
 
     return { runs };
@@ -96,12 +153,8 @@ export class OrchestratorService {
       record.cancellationRequested = true;
     });
 
-    if (run.pid) {
-      try {
-        process.kill(run.pid);
-      } catch {
-        // Ignore missing process; the persisted cancellation flag still takes effect on resume.
-      }
+    if (run.phase === "completed" || run.phase === "failed" || run.phase === "cancelled") {
+      return run;
     }
 
     return this.store.transitionPhase(runId, "cancelled", "Cancellation requested by operator.");
@@ -113,21 +166,8 @@ export class OrchestratorService {
       return run;
     }
 
-    if (run.pid) {
-      try {
-        process.kill(run.pid, 0);
-        return run;
-      } catch {
-        // Worker is gone; relaunch.
-      }
-    }
-
-    const pid = await this.launchWorker(runId);
-    return this.store.updateRun(runId, (record) => {
-      record.pid = pid;
-      record.status = record.phase === "queued" ? "queued" : "running";
-      record.cancellationRequested = false;
-    });
+    await this.runWorker(runId);
+    return this.store.getRun(runId);
   }
 
   public async getLogs(runId: string, tail = 100): Promise<string[]> {
@@ -143,18 +183,13 @@ export class OrchestratorService {
   public async runWorker(runId: string): Promise<void> {
     const run = await this.store.getRun(runId);
     const logger = new RunLogger(run.logPath);
-    await mkdir(path.dirname(run.logPath), { recursive: true });
-    await logger.log(`Worker started for ${run.id}.`);
+    await logger.log(`Run started for ${run.id}.`);
 
     try {
-      if (run.kind === "orchestrator") {
-        await this.runHansWorker(run, logger);
-      } else {
-        await this.runDeveloperWorker(run, logger);
-      }
-
+      await this.runHansWorker(run, logger);
       await this.store.transitionPhase(run.id, "completed", "Run completed.");
       await logger.log("Run completed.");
+      this.announce(`Run ${run.id} completed.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await logger.log(`Run failed: ${message}`);
@@ -165,6 +200,7 @@ export class OrchestratorService {
       if (latest.phase !== "cancelled") {
         await this.store.transitionPhase(run.id, "failed", message);
       }
+      this.announce(`Run ${run.id} failed.`);
     } finally {
       const latest = await this.store.getRun(run.id);
       await this.workspaceManager.cleanup(latest);
@@ -174,92 +210,43 @@ export class OrchestratorService {
   private async runHansWorker(run: RunRecord, logger: RunLogger): Promise<void> {
     let current = run;
     current = await this.ensurePhase(current, "preparing-workspace", async (record) => {
-      await logger.log("Preparing Hans workspace.");
+      this.announce("Stage: workspace.");
+      await logger.log("Preparing workspace.");
       await this.workspaceManager.prepareWorkspace(record);
     });
 
-    current = await this.ensurePhase(current, "drafting-spec", async (record) => {
-      const workflowProvider = createWorkflowProvider(this.config, record);
-      await logger.log(`Running ${workflowProvider.id} preparation stage for Hans.`);
-      const result = await workflowProvider.prepareRun(record);
-      await this.store.updateRun(record.id, (mutableRun) => {
-        mutableRun.workflow = { ...mutableRun.workflow, ...result.workflow };
-      });
-      if (result.logOutput) {
-        await logger.log(result.logOutput);
-      }
-      await this.spawnDeveloperRuns(record, logger);
-      await this.waitForDeveloperRuns(record.id, logger);
+    current = await this.ensurePhase(current, "drafting-prd", async (record) => {
+      this.announce("Stage: PRD.");
+      await this.runCouncilLoop(record, logger);
     });
 
     current = await this.ensurePhase(current, "implementing", async (record) => {
-      const developers = await this.getDeveloperRuns(record.id);
-      const memberResults = this.deliberation.createMemberResults(developers);
-      const deliberationRounds: TeamAgreement[] = [];
-      const roundOne = this.deliberation.evaluateRoundOne(memberResults);
-      deliberationRounds.push(roundOne);
-      await logger.log(`Hans round 1 average individual score: ${roundOne.score}/100.`);
-
-      let bestAgreement = roundOne;
-      for (const round of [2, 3] as const) {
-        const mergedAgreement = this.deliberation.deliberateMerge(memberResults, round, roundOne);
-        deliberationRounds.push(mergedAgreement);
-        if (mergedAgreement.score > bestAgreement.score) {
-          bestAgreement = mergedAgreement;
-        }
-        await logger.log(`Hans round ${round} merged score: ${mergedAgreement.score}/100.`);
-        if (mergedAgreement.accepted) {
-          bestAgreement = mergedAgreement;
-          break;
-        }
-      }
-
-      const finalAgreement =
-        bestAgreement.accepted
-          ? bestAgreement
-          : this.deliberation.selectBestIndividualFallback(memberResults, roundOne);
-
+      const refreshed = await this.store.getRun(record.id);
+      const workflowProvider = createWorkflowProvider(this.config, refreshed);
+      this.announce("Stage: OpenSpec.");
+      await logger.log("Preparing OpenSpec implementation stage.");
+      const prepareResult = await workflowProvider.prepareRun(refreshed);
       await this.store.updateRun(record.id, (mutableRun) => {
-        mutableRun.team = {
-          orchestratorName: HANS_PROFILE.name,
-          developerRunIds: developers.map((developer) => developer.id),
-          memberResults,
-          deliberationRounds,
-          finalAgreement,
-          finalWorkspacePath:
-            mutableRun.team?.finalWorkspacePath ?? this.getFinalWorkspacePath(mutableRun.id),
-        };
-        mutableRun.summary = finalAgreement.summary;
+        mutableRun.workflow = { ...mutableRun.workflow, ...prepareResult.workflow };
       });
-
-      if (!finalAgreement.accepted) {
-        await logger.log(
-          `Hans did not reach 90/100 after ${MAX_DELIBERATION_ROUNDS} rounds; discarding the merge and proceeding with the best individual Round 1 solution from ${finalAgreement.selectedPersonaName}.`,
-        );
+      if (prepareResult.logOutput) {
+        await logger.log(prepareResult.logOutput);
       }
 
-      const refreshed = await this.prepareFinalImplementationRun(await this.store.getRun(record.id), logger);
-      await logger.log("Starting Hans final implementation session.");
-      const result = await this.copilot.implement(refreshed, logger);
+      this.announce("Stage: build.");
+      const implementationRun = await this.store.getRun(record.id);
+      const result = await this.copilot.implement(implementationRun, logger);
       await this.store.updateRun(record.id, (mutableRun) => {
         mutableRun.integration.copilotSessionId = result.sessionId;
         mutableRun.summary = result.summary ?? mutableRun.summary;
-        mutableRun.team = {
-          orchestratorName: mutableRun.team?.orchestratorName ?? HANS_PROFILE.name,
-          developerRunIds: mutableRun.team?.developerRunIds ?? [],
-          memberResults: mutableRun.team?.memberResults ?? [],
-          deliberationRounds: mutableRun.team?.deliberationRounds ?? [],
-          finalAgreement: mutableRun.team?.finalAgreement,
-          finalWorkspacePath: refreshed.workspacePath,
-        };
       });
     });
 
     await this.ensurePhase(current, "handoff", async (record) => {
-      const finalRun = await this.getFinalImplementationRun(await this.store.getRun(record.id));
-      const workflowProvider = createWorkflowProvider(this.config, finalRun);
-      await logger.log(`Running ${workflowProvider.id} handoff stage for Hans.`);
-      const result = await workflowProvider.finalizeRun(finalRun);
+      const refreshed = await this.store.getRun(record.id);
+      const workflowProvider = createWorkflowProvider(this.config, refreshed);
+      this.announce("Stage: handoff.");
+      const result = await workflowProvider.finalizeRun(refreshed);
       await this.store.updateRun(record.id, (mutableRun) => {
         mutableRun.workflow = { ...mutableRun.workflow, ...result.workflow };
       });
@@ -274,48 +261,300 @@ export class OrchestratorService {
         mutableRun.integration.dispatchResponse = published.detail;
       });
       await logger.log(published.detail);
+      this.announce(shorten(published.detail));
     });
   }
 
-  private async runDeveloperWorker(run: RunRecord, logger: RunLogger): Promise<void> {
-    let current = run;
-    current = await this.ensurePhase(current, "preparing-workspace", async (record) => {
-      await logger.log(`Preparing developer workspace for ${record.personaId}.`);
-      await this.workspaceManager.prepareWorkspace(record);
-    });
+  private async runCouncilLoop(run: RunRecord, logger: RunLogger): Promise<void> {
+    const current = await this.store.getRun(run.id);
+    const items = current.prd?.discussionItems ?? [];
 
-    current = await this.ensurePhase(current, "drafting-spec", async (record) => {
-      const workflowProvider = createWorkflowProvider(this.config, record);
-      await logger.log(`Running ${workflowProvider.id} preparation stage for ${record.personaId}.`);
-      const result = await workflowProvider.prepareRun(record);
-      await this.store.updateRun(record.id, (mutableRun) => {
-        mutableRun.workflow = { ...mutableRun.workflow, ...result.workflow };
-      });
-      if (result.logOutput) {
-        await logger.log(result.logOutput);
+    for (const item of items) {
+      if ((item.roundsCompleted ?? 0) >= item.maxRounds && item.resolution) {
+        continue;
       }
-    });
 
-    current = await this.ensurePhase(current, "implementing", async (record) => {
-      await logger.log(`Starting developer implementation session for ${record.personaId}.`);
-      const result = await this.copilot.implement(record, logger);
-      await this.store.updateRun(record.id, (mutableRun) => {
-        mutableRun.integration.copilotSessionId = result.sessionId;
-        mutableRun.summary = result.summary;
-      });
-    });
+      this.announce(`Agenda: ${item.title}.`);
+      const roundOne = await this.collectContributions(current.id, item, 1, item.prompt, logger);
+      const firstModeration = await this.moderateItem(current.id, item, 1, roundOne, logger);
+      let decision = firstModeration;
+      let roundsUsed: 1 | 2 = 1;
 
-    await this.ensurePhase(current, "handoff", async (record) => {
-      const workflowProvider = createWorkflowProvider(this.config, record);
-      await logger.log(`Running ${workflowProvider.id} handoff stage for ${record.personaId}.`);
-      const result = await workflowProvider.finalizeRun(record);
-      await this.store.updateRun(record.id, (mutableRun) => {
-        mutableRun.workflow = { ...mutableRun.workflow, ...result.workflow };
-      });
-      if (result.logOutput) {
-        await logger.log(result.logOutput);
+      if (firstModeration.requiresFollowUp && item.maxRounds > 1) {
+        this.announce(`Round 2 on ${item.title}.`);
+        const followUpPrompt = firstModeration.followUpPrompt ?? item.prompt;
+        const roundTwo = await this.collectContributions(
+          current.id,
+          item,
+          2,
+          followUpPrompt,
+          logger,
+        );
+        decision = await this.moderateItem(
+          current.id,
+          item,
+          2,
+          [...roundOne, ...roundTwo],
+          logger,
+        );
+        roundsUsed = 2;
       }
+
+      await this.store.updateRun(current.id, (mutableRun) => {
+        const nextTeam = mutableRun.team ?? {
+          orchestratorName: HANS_PROFILE.name,
+          memberResults: [],
+          contributions: [],
+          decisions: [],
+        };
+        nextTeam.decisions = [
+          ...nextTeam.decisions.filter((existing) => existing.itemId !== item.id),
+          this.deliberation.createDecision(
+            item,
+            roundsUsed,
+            decision.summary,
+            roundsUsed === 1 ? decision.followUpPrompt : undefined,
+          ),
+        ];
+        nextTeam.memberResults = this.deliberation.createMemberResults(nextTeam.contributions);
+        mutableRun.team = nextTeam;
+
+        const prd = mutableRun.prd ?? this.prd.createInitialState(mutableRun);
+        prd.discussionItems = prd.discussionItems.map((candidate) =>
+          candidate.id === item.id
+            ? {
+                ...candidate,
+                roundsCompleted: roundsUsed,
+                resolution: decision.summary,
+                followUpPrompt: roundsUsed === 1 ? decision.followUpPrompt : undefined,
+              }
+            : candidate,
+        );
+        mutableRun.prd = prd;
+      });
+
+      this.announce(shorten(`Hans merged ${item.title}. ${decision.summary}`));
+    }
+
+    const withDecisions = await this.store.getRun(run.id);
+    this.announce("Hans is writing the PRD.");
+    const prdPrompt = this.buildPrdPrompt(withDecisions);
+    const prdResult = await this.copilot.sendPrompt(
+      withDecisions,
+      logger,
+      prdPrompt,
+      `${run.id}-prd`,
+    );
+    const markdown = prdResult.response?.trim();
+
+    if (!markdown) {
+      throw new Error("Hans did not produce a PRD draft.");
+    }
+
+    this.prd.validateDocument(markdown);
+    await this.prd.writeDocument(withDecisions.prd ?? this.prd.createInitialState(withDecisions), markdown);
+    const workspacePrdPath = await this.prd.syncDocumentToWorkspace(
+      withDecisions,
+      withDecisions.prd ?? this.prd.createInitialState(withDecisions),
+      markdown,
+    );
+
+    await this.store.updateRun(run.id, (mutableRun) => {
+      const prd = mutableRun.prd ?? this.prd.createInitialState(mutableRun);
+      prd.finalDocument = markdown;
+      prd.synopsis = this.prd.buildFinalSynopsis(mutableRun.team?.decisions ?? []);
+      prd.workspaceFilePath = workspacePrdPath;
+      mutableRun.prd = prd;
+      mutableRun.summary = `PRD ready at ${prd.filePath}.`;
     });
+
+    this.announce("PRD saved.");
+  }
+
+  private async collectContributions(
+    runId: string,
+    item: PrdDiscussionItem,
+    round: 1 | 2,
+    agendaPrompt: string,
+    logger: RunLogger,
+  ): Promise<CouncilContribution[]> {
+    const contributions: CouncilContribution[] = [];
+
+    for (const persona of DEVELOPER_PERSONAS) {
+      this.announce(`Hans calls ${persona.name}.`);
+      const run = await this.store.getRun(runId);
+      const prompt = this.buildContributionPrompt(run, item, round, agendaPrompt, persona);
+      const result = await this.copilot.sendPrompt(
+        run,
+        logger,
+        prompt,
+        `${run.id}-${persona.id}-${item.id}-r${round}`,
+      );
+      const content = result.response?.trim();
+      if (!content) {
+        throw new Error(`${persona.name} did not return a PRD contribution.`);
+      }
+
+      const contribution = this.deliberation.createContribution(
+        item,
+        persona.id,
+        persona.name,
+        round,
+        content,
+      );
+      contributions.push(contribution);
+
+      await this.store.updateRun(runId, (mutableRun) => {
+        const nextTeam = mutableRun.team ?? {
+          orchestratorName: HANS_PROFILE.name,
+          memberResults: [],
+          contributions: [],
+          decisions: [],
+        };
+        nextTeam.contributions = [...nextTeam.contributions, contribution];
+        nextTeam.memberResults = this.deliberation.createMemberResults(nextTeam.contributions);
+        mutableRun.team = nextTeam;
+      });
+    }
+
+    return contributions;
+  }
+
+  private async moderateItem(
+    runId: string,
+    item: PrdDiscussionItem,
+    round: 1 | 2,
+    contributions: CouncilContribution[],
+    logger: RunLogger,
+  ): Promise<z.infer<typeof MODERATION_RESPONSE_SCHEMA>> {
+    const run = await this.store.getRun(runId);
+    const prompt = this.buildModerationPrompt(run, item, round, contributions);
+    const result = await this.copilot.sendPrompt(
+      run,
+      logger,
+      prompt,
+      `${run.id}-hans-${item.id}-r${round}`,
+    );
+    const content = result.response?.trim();
+    if (!content) {
+      throw new Error(`Hans did not return a moderation decision for ${item.title}.`);
+    }
+
+    return MODERATION_RESPONSE_SCHEMA.parse(JSON.parse(extractLastJsonBlock(content)));
+  }
+
+  private buildContributionPrompt(
+    run: RunRecord,
+    item: PrdDiscussionItem,
+    round: 1 | 2,
+    agendaPrompt: string,
+    persona: (typeof DEVELOPER_PERSONAS)[number],
+  ): string {
+    const priorDecisions = run.team?.decisions.map((decision) => `- ${decision.itemTitle}: ${decision.summary}`) ?? [];
+
+    return [
+      `You are ${persona.name}, seated at Hans's circular PRD table.`,
+      `Persona title: ${persona.title}.`,
+      persona.summary,
+      `Working style: ${persona.style}`,
+      `Value focus: ${persona.valueFocus}`,
+      "",
+      `Feature request: ${run.feature}`,
+      `Agenda item: ${item.title}`,
+      `Round: ${round}`,
+      `Agenda prompt: ${agendaPrompt}`,
+      "",
+      "Council rules:",
+      "1. You are drafting a PRD only.",
+      "2. Do not create code, edit files, or run OpenSpec.",
+      "3. Contribute concrete product and architecture ideas that Hans can merge.",
+      "4. Keep the answer focused on this agenda item.",
+      "",
+      ...(priorDecisions.length ? ["Decisions already closed:", ...priorDecisions, ""] : []),
+      "Reply in markdown with these headings exactly:",
+      "## Proposal",
+      "## Decisions",
+      "## Risks",
+      "## Open Questions",
+    ].join("\n");
+  }
+
+  private buildModerationPrompt(
+    run: RunRecord,
+    item: PrdDiscussionItem,
+    round: 1 | 2,
+    contributions: CouncilContribution[],
+  ): string {
+    return [
+      "You are Hans moderating the OS Agents circular PRD table.",
+      `Feature request: ${run.feature}`,
+      `Agenda item: ${item.title}`,
+      `Round under review: ${round}`,
+      "",
+      this.deliberation.buildDiscussionSnapshot(item, contributions),
+      "",
+      "Decide whether the item is clear enough to close now.",
+      "A second round is allowed only when the item still has material gaps.",
+      "Never allow more than 2 rounds for the item.",
+      "",
+      "Respond with JSON only:",
+      "{",
+      '  "summary": "short merged decision",',
+      '  "requiresFollowUp": true,',
+      '  "followUpPrompt": "targeted follow-up question only when needed"',
+      "}",
+      "",
+      "If this is round 2, set requiresFollowUp to false.",
+    ].join("\n");
+  }
+
+  private buildPrdPrompt(run: RunRecord): string {
+    const prd = run.prd ?? this.prd.createInitialState(run);
+    const decisions = run.team?.decisions.map((decision) => `- ${decision.itemTitle}: ${decision.summary}`) ?? [];
+    const contributions = run.team?.contributions.map(
+      (contribution) =>
+        `### ${contribution.name} / ${contribution.itemTitle} / round ${contribution.round}\n${contribution.content}`,
+    ) ?? [];
+
+    return [
+      "You are Hans, writing the final PRD for OS Agents.",
+      `PRD title: ${prd.title ?? run.feature}`,
+      `PRD version: ${prd.version ?? "1.0.0"}`,
+      `PRD date: ${prd.date ?? new Date().toISOString().slice(0, 10)}`,
+      `Feature request: ${run.feature}`,
+      `Output file: ${prd.filePath ?? "features/<feature>.md"}`,
+      "",
+      "Closed council decisions:",
+      ...decisions,
+      "",
+      "Full council material:",
+      ...contributions,
+      "",
+      "Write a complete markdown PRD that follows these mandatory rules:",
+      ...this.prd.buildArc42Checklist().map((line) => `- ${line}`),
+      "",
+      "Use these headings exactly:",
+      "# PRD: <title>",
+      "## Metadata",
+      "## 1. Introduction and Goals",
+      "## 2. Constraints",
+      "## 3. Context and Scope",
+      "## 4. Solution Strategy",
+      "## 5. Building Block View",
+      "## 6. Runtime View",
+      "## 7. Deployment View",
+      "## 8. Crosscutting Concepts",
+      "## 9. Architectural Decisions",
+      "## 10. Quality Requirements",
+      "## 11. Risks and Technical Debt",
+      "## 12. Glossary",
+      "## Delivery Plan",
+      "## Acceptance Criteria",
+      "",
+      "Embed PlantUML C4 diagrams in fenced ```plantuml blocks.",
+      "Include at least a System Context diagram, a Container diagram, and a Component diagram.",
+      "Do not return explanations before or after the markdown document.",
+    ].join("\n");
   }
 
   private async ensurePhase(
@@ -332,7 +571,7 @@ export class OrchestratorService {
       return this.store.getRun(run.id);
     }
 
-    const phaseOrder = ["queued", "preparing-workspace", "drafting-spec", "implementing", "handoff"];
+    const phaseOrder = ["queued", "preparing-workspace", "drafting-prd", "implementing", "handoff"];
     if (phaseOrder.indexOf(run.phase) > phaseOrder.indexOf(targetPhase)) {
       return run;
     }
@@ -342,144 +581,18 @@ export class OrchestratorService {
     return this.store.getRun(run.id);
   }
 
-  private async launchWorker(runId: string): Promise<number> {
-    const currentModulePath = fileURLToPath(import.meta.url);
-    const workerArgs = currentModulePath.endsWith(".ts")
-      ? ["--import", "tsx", sourceEntryPath, "__run-worker", runId]
-      : [builtEntryPath, "__run-worker", runId];
-
-    const child = spawn(process.execPath, workerArgs, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: process.env,
-    });
-    child.unref();
-    return child.pid ?? 0;
-  }
-
-  private async spawnDeveloperRuns(parentRun: RunRecord, logger: RunLogger): Promise<void> {
-    const repository = parentRun.repository;
-    const developerRuns: RunRecord[] = [];
-
-    for (const persona of DEVELOPER_PERSONAS) {
-      const runId = makeRunId(`${parentRun.feature}-${persona.id}`);
-      const developerRun: RunRecord = {
-        id: runId,
-        kind: "developer",
-        parentRunId: parentRun.id,
-        personaId: persona.id,
-        repository,
-        baseBranch: parentRun.baseBranch,
-        feature: parentRun.feature,
-        featureSlug: parentRun.featureSlug,
-        featureBranch: `copilot/${parentRun.featureSlug}-${persona.id}-${runId.slice(-8)}`,
-        workspacePath: this.workspaceManager.getWorkspacePath(runId),
-        logPath: path.join(this.config.logsRoot, `${runId}.log`),
-        handoffPath: path.join(this.config.handoffsRoot, `${runId}.json`),
-        status: "queued",
-        phase: "queued",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        cancellationRequested: false,
-        integration: {
-          remoteSessionMode: this.config.copilot.remoteSessionMode,
-          dispatchStatus: "pending",
-        },
-        workflow: {
-          provider: this.config.workflow.defaultProvider,
-        },
-        history: [{ phase: "queued", at: new Date().toISOString(), message: `Developer run created for ${persona.name}.` }],
-      };
-
-      await this.store.saveRun(developerRun);
-      const pid = await this.launchWorker(developerRun.id);
-      const updated = await this.store.updateRun(developerRun.id, (record) => {
-        record.pid = pid;
-        record.status = "running";
-      });
-      developerRuns.push(updated);
-      await logger.log(`Spawned developer ${persona.name} as run ${updated.id}.`);
-    }
-
-    await this.store.updateRun(parentRun.id, (record) => {
-      record.team = {
-        orchestratorName: HANS_PROFILE.name,
-        developerRunIds: developerRuns.map((developer) => developer.id),
-        memberResults: record.team?.memberResults ?? [],
-        deliberationRounds: record.team?.deliberationRounds ?? [],
-        finalAgreement: record.team?.finalAgreement,
-      };
-    });
-  }
-
-  private async waitForDeveloperRuns(parentRunId: string, logger: RunLogger): Promise<void> {
-    while (true) {
-      const developers = await this.getDeveloperRuns(parentRunId);
-      if (
-        developers.length === DEVELOPER_PERSONAS.length &&
-        developers.every((developer) =>
-          ["completed", "failed", "cancelled"].includes(developer.status),
-        )
-      ) {
-        await logger.log("All developer runs finished.");
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+  private async resolveBaseBranch(repositoryPath: string): Promise<string> {
+    try {
+      const result = await execFile("git", ["branch", "--show-current"], { cwd: repositoryPath });
+      return result.stdout.trim() || "main";
+    } catch {
+      return "main";
     }
   }
 
-  private async getDeveloperRuns(parentRunId: string): Promise<RunRecord[]> {
-    const runs = await this.store.listRuns();
-    return runs.filter((run) => run.parentRunId === parentRunId);
-  }
-
-  private getFinalWorkspacePath(runId: string): string {
-    return path.join(this.config.workspaceRoot, `${runId}-final`);
-  }
-
-  private async prepareFinalImplementationRun(run: RunRecord, logger: RunLogger): Promise<RunRecord> {
-    const finalWorkspacePath = run.team?.finalWorkspacePath ?? this.getFinalWorkspacePath(run.id);
-    const finalRun = {
-      ...run,
-      workspacePath: finalWorkspacePath,
-    };
-
-    await logger.log(`Preparing dedicated final workspace at ${finalWorkspacePath}.`);
-    await this.workspaceManager.prepareWorkspaceAt(finalRun, finalWorkspacePath);
-
-    const workflowProvider = createWorkflowProvider(this.config, finalRun);
-    const result = await workflowProvider.prepareRun(finalRun);
-    await this.store.updateRun(run.id, (mutableRun) => {
-      mutableRun.workflow = { ...mutableRun.workflow, ...result.workflow };
-      mutableRun.team = {
-        orchestratorName: mutableRun.team?.orchestratorName ?? HANS_PROFILE.name,
-        developerRunIds: mutableRun.team?.developerRunIds ?? [],
-        memberResults: mutableRun.team?.memberResults ?? [],
-        deliberationRounds: mutableRun.team?.deliberationRounds ?? [],
-        finalAgreement: mutableRun.team?.finalAgreement,
-        finalWorkspacePath,
-      };
-    });
-    if (result.logOutput) {
-      await logger.log(result.logOutput);
+  private announce(message: string): void {
+    if (this.options.liveOutput) {
+      console.log(shorten(message));
     }
-
-    return {
-      ...(await this.store.getRun(run.id)),
-      workspacePath: finalWorkspacePath,
-    };
-  }
-
-  private async getFinalImplementationRun(run: RunRecord): Promise<RunRecord> {
-    if (!run.team?.finalWorkspacePath) {
-      return run;
-    }
-
-    return {
-      ...run,
-      workspacePath: run.team.finalWorkspacePath,
-    };
   }
 }

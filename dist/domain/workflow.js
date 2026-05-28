@@ -1,7 +1,7 @@
 const ORDERED_ACTIVE_PHASES = [
     "queued",
     "preparing-workspace",
-    "drafting-spec",
+    "drafting-prd",
     "implementing",
     "handoff",
 ];

@@ -16,13 +16,6 @@ describe("OpenSpecWorkflowProvider", () => {
       kind: "developer",
       parentRunId: "hans-1",
       personaId: "david",
-      repository: {
-        input: "owner/repo",
-        cloneUrl: "https://github.com/owner/repo.git",
-        owner: "owner",
-        name: "repo",
-        provider: "github",
-      },
       baseBranch: "main",
       feature: "Ship workflow swap",
       featureSlug: "ship-workflow-swap",
@@ -31,7 +24,7 @@ describe("OpenSpecWorkflowProvider", () => {
       logPath: path.join(config.logsRoot, "run-1.log"),
       handoffPath: path.join(config.handoffsRoot, "run-1.json"),
       status: "queued",
-      phase: "drafting-spec",
+      phase: "drafting-prd",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       cancellationRequested: false,
@@ -41,6 +34,19 @@ describe("OpenSpecWorkflowProvider", () => {
       },
       workflow: {
         provider: "openspec",
+      },
+      team: {
+        orchestratorName: "Hans",
+        memberResults: [],
+        contributions: [],
+        decisions: [],
+      },
+      prd: {
+        title: "Ship Workflow Swap",
+        version: "1.0.0",
+        date: "2026-05-28",
+        filePath: path.join(config.featuresRoot, "ship-workflow-swap-v1.0.0-2026-05-28.md"),
+        discussionItems: [],
       },
       history: [{ phase: "queued", at: new Date().toISOString() }],
     });

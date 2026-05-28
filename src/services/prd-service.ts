@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AppConfig,
@@ -22,6 +22,12 @@ function today(): string {
 
 export class PrdService {
   public constructor(private readonly config: AppConfig) {}
+
+  public normalizeDocument(markdown: string): string {
+    const trimmed = markdown.trim();
+    const fencedMatch = trimmed.match(/^```(?:markdown)?\s*([\s\S]*?)\s*```$/i);
+    return fencedMatch ? fencedMatch[1].trim() : trimmed;
+  }
 
   public createInitialState(run: RunRecord): PrdState {
     const date = today();
@@ -54,6 +60,7 @@ export class PrdService {
   }
 
   public validateDocument(markdown: string): void {
+    const normalized = this.normalizeDocument(markdown);
     const requiredHeadings = [
       "# PRD:",
       "## 1. Introduction and Goals",
@@ -73,15 +80,54 @@ export class PrdService {
     ];
 
     for (const heading of requiredHeadings) {
-      if (!markdown.includes(heading)) {
+      if (!normalized.includes(heading)) {
         throw new Error(`PRD validation failed: missing heading "${heading}".`);
       }
     }
 
-    const plantUmlBlocks = markdown.match(/```plantuml[\s\S]*?```/g) ?? [];
+    const plantUmlBlocks = normalized.match(/```plantuml[\s\S]*?```/g) ?? [];
     if (plantUmlBlocks.length < 3) {
       throw new Error("PRD validation failed: expected at least 3 PlantUML C4 diagrams.");
     }
+  }
+
+  public async resolveDocument(
+    run: Pick<RunRecord, "createdAt" | "workspacePath">,
+    prd: Pick<PrdState, "filePath">,
+    response?: string,
+  ): Promise<string> {
+    const attemptedErrors: string[] = [];
+    const normalizedResponse = response ? this.normalizeDocument(response) : undefined;
+
+    if (normalizedResponse) {
+      try {
+        this.validateDocument(normalizedResponse);
+        return normalizedResponse;
+      } catch (error) {
+        attemptedErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    const candidatePaths = [
+      prd.filePath,
+      prd.filePath ? path.join(run.workspacePath, "features", path.basename(prd.filePath)) : undefined,
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    for (const candidatePath of candidatePaths) {
+      if (!(await this.wasUpdatedForRun(candidatePath, run.createdAt))) {
+        continue;
+      }
+
+      const candidate = this.normalizeDocument(await readFile(candidatePath, "utf8"));
+      try {
+        this.validateDocument(candidate);
+        return candidate;
+      } catch (error) {
+        attemptedErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    throw new Error(attemptedErrors[0] ?? "Hans did not produce a valid PRD document.");
   }
 
   public buildFinalSynopsis(decisions: CouncilDecision[]): string {
@@ -96,6 +142,16 @@ export class PrdService {
       "Embed PlantUML C4 diagrams for system context, containers, and components.",
       "Use concrete decisions, not placeholders.",
     ];
+  }
+
+  private async wasUpdatedForRun(filePath: string, createdAt: string): Promise<boolean> {
+    try {
+      await access(filePath);
+      const details = await stat(filePath);
+      return details.mtimeMs >= Date.parse(createdAt) - 1000;
+    } catch {
+      return false;
+    }
   }
 
   private buildDiscussionItems(): PrdDiscussionItem[] {

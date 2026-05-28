@@ -84,8 +84,7 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
   const logsRoot = path.join(stateRoot, "logs");
   const handoffsRoot = path.join(stateRoot, "handoffs");
   const featuresRoot = path.join(projectRoot, "features");
-  const baseDirectory =
-    fileConfig.copilot?.baseDirectory ?? path.join(stateRoot, "copilot-home");
+  const baseDirectory = fileConfig.copilot?.baseDirectory;
 
   const config: AppConfig = {
     projectRoot,
@@ -139,7 +138,9 @@ export async function loadConfig(configPath?: string): Promise<AppConfig> {
     mkdir(config.logsRoot, { recursive: true }),
     mkdir(config.handoffsRoot, { recursive: true }),
     mkdir(config.featuresRoot, { recursive: true }),
-    mkdir(config.copilot.baseDirectory, { recursive: true }),
+    ...(config.copilot.baseDirectory
+      ? [mkdir(config.copilot.baseDirectory, { recursive: true })]
+      : []),
   ]);
 
   return config;

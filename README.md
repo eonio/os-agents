@@ -33,14 +33,14 @@ os-agents init
 For a Debian or other headless Linux host where you want a direct shell command, install it globally:
 
 ```bash
-npm install -g @eonio/os-agents
+npm install -g @eonio-dev/os-agents
 os-agents --help
 ```
 
 The same global install model works on **Windows PowerShell** and **cmd** too. npm creates the command shims automatically, so after:
 
 ```powershell
-npm install -g @eonio/os-agents
+npm install -g @eonio-dev/os-agents
 os-agents --help
 ```
 
@@ -57,7 +57,7 @@ os-agents list
 If you prefer a project-local install instead, install in the host project where you want `.os-agents/` and `features/` to be managed:
 
 ```bash
-npm install @eonio/os-agents
+npm install @eonio-dev/os-agents
 ```
 
 Or link it locally while developing this repository:
@@ -67,6 +67,48 @@ npm install
 npm run build
 npm link
 os-agents list
+```
+
+## Publish to npm
+
+To make the package installable directly from npm:
+
+1. Make sure the npm scope `@eonio-dev` exists and your account can publish `@eonio-dev/os-agents`
+2. Log in to npm with `npm login`
+3. Build the package with `npm run build`
+4. Optionally inspect the publish payload with `npm pack`
+5. Publish it with:
+
+```bash
+npm publish --access public
+```
+
+If npm package publish is protected by **2FA**, publishing from a headless server usually requires a **granular npm access token** with package publish permission and **bypass 2FA for publishing** enabled. A typical headless flow is:
+
+```bash
+npm config set //registry.npmjs.org/:_authToken=YOUR_TOKEN
+npm whoami
+npm publish --access public
+```
+
+Before retrying publish, verify:
+
+- your npm account owns or can publish `@eonio-dev/os-agents`
+- `npm whoami` returns the expected account
+- the token supports publishing and has 2FA bypass enabled when required by npm policy
+
+If npm returns **404 Not Found** while publishing, it usually means the npm account or token does not own the package name or does not have permission to publish that package. For `@eonio-dev/os-agents`, verify that:
+
+- the npm scope `@eonio-dev` exists and belongs to your npm account or org
+- your logged-in npm user can publish packages inside that scope
+- the package name in `package.json` matches the npm name you actually control
+
+If you do not control that scope on npm, change the package name before publishing.
+
+After publishing, users can install it directly with:
+
+```bash
+npm install -g @eonio-dev/os-agents
 ```
 
 ## Configuration
@@ -79,6 +121,7 @@ Runtime defaults:
 - Runtime root: `.os-agents/`
 - PRD output root: `features/`
 - Workspace root: `.os-agents/workspaces/`
+- Copilot auth/session home: the user's default Copilot home unless `copilot.baseDirectory` is set
 
 Environment variables:
 
@@ -170,7 +213,7 @@ Use `--json` with `spawn`, `list`, `status`, `logs`, `cancel`, and `resume` for 
 
 Recommended first real-world test:
 
-1. Install globally: `npm install -g @eonio/os-agents`
+1. Install globally: `npm install -g @eonio-dev/os-agents`
 2. Move into a real project folder
 3. Run `os-agents init`
 4. Confirm the project has:
@@ -210,7 +253,8 @@ By default, runtime data lives under `.os-agents/` in the host project:
 - `logs/` - per-run logs
 - `handoffs/` - JSON handoff artifacts
 - `workspaces/` - isolated implementation clones
-- `copilot-home/` - Copilot SDK session state
+
+By default, Copilot authentication and session state stay in the user's normal Copilot home. Set `copilot.baseDirectory` only when you explicitly want an isolated Copilot state directory for this project.
 
 PRDs are written to:
 

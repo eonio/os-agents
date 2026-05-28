@@ -175,7 +175,7 @@ export interface GitHubConfig {
 export interface CopilotConfig {
   model: string;
   logLevel: "none" | "error" | "warning" | "info" | "debug" | "all";
-  baseDirectory: string;
+  baseDirectory?: string;
   remoteSessionMode: RemoteSessionMode;
 }
 

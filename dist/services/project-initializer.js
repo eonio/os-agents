@@ -46,7 +46,9 @@ export class ProjectInitializer {
             mkdir(config.logsRoot, { recursive: true }),
             mkdir(config.handoffsRoot, { recursive: true }),
             mkdir(config.featuresRoot, { recursive: true }),
-            mkdir(config.copilot.baseDirectory, { recursive: true }),
+            ...(config.copilot.baseDirectory
+                ? [mkdir(config.copilot.baseDirectory, { recursive: true })]
+                : []),
         ]);
     }
     async copyExampleConfig() {

@@ -281,13 +281,14 @@ export class OrchestratorService {
         this.announce("Hans is writing the PRD.");
         const prdPrompt = this.buildPrdPrompt(withDecisions);
         const prdResult = await this.copilot.sendPrompt(withDecisions, logger, prdPrompt, `${run.id}-prd`);
-        const markdown = prdResult.response?.trim();
+        const prdState = withDecisions.prd ?? this.prd.createInitialState(withDecisions);
+        const markdown = await this.prd.resolveDocument(withDecisions, prdState, prdResult.response);
         if (!markdown) {
             throw new Error("Hans did not produce a PRD draft.");
         }
         this.prd.validateDocument(markdown);
-        await this.prd.writeDocument(withDecisions.prd ?? this.prd.createInitialState(withDecisions), markdown);
-        const workspacePrdPath = await this.prd.syncDocumentToWorkspace(withDecisions, withDecisions.prd ?? this.prd.createInitialState(withDecisions), markdown);
+        await this.prd.writeDocument(prdState, markdown);
+        const workspacePrdPath = await this.prd.syncDocumentToWorkspace(withDecisions, prdState, markdown);
         await this.store.updateRun(run.id, (mutableRun) => {
             const prd = mutableRun.prd ?? this.prd.createInitialState(mutableRun);
             prd.finalDocument = markdown;
@@ -427,6 +428,7 @@ export class OrchestratorService {
             "",
             "Embed PlantUML C4 diagrams in fenced ```plantuml blocks.",
             "Include at least a System Context diagram, a Container diagram, and a Component diagram.",
+            "Do not use tools and do not write files yourself.",
             "Do not return explanations before or after the markdown document.",
         ].join("\n");
     }

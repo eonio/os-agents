@@ -6,6 +6,10 @@ export function isAuthorizationError(error) {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes("Authorization error") || message.includes("/login");
 }
+export function isMissingAuthenticationError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("Session was not created with authentication info or custom provider");
+}
 export function isModelUnavailableError(error) {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes('Model "') && message.includes('" is not available');
@@ -68,7 +72,7 @@ export class CopilotProvider {
     async runSession(run, logger, options) {
         const client = new CopilotClient({
             workingDirectory: run.workspacePath,
-            baseDirectory: this.config.copilot.baseDirectory,
+            baseDirectory: options.baseDirectory,
             logLevel: this.config.copilot.logLevel,
             gitHubToken: options.gitHubToken,
             useLoggedInUser: options.useLoggedInUser,
@@ -118,9 +122,20 @@ export class CopilotProvider {
                 gitHubToken: this.config.github.token,
                 useLoggedInUser: !this.config.github.token,
                 model: this.config.copilot.model,
+                baseDirectory: this.config.copilot.baseDirectory,
             });
         }
         catch (error) {
+            if (!this.config.github.token && this.config.copilot.baseDirectory && isMissingAuthenticationError(error)) {
+                await logger.log("Project-local Copilot auth state is empty; retrying with the user's default Copilot login.");
+                return this.runSession(run, logger, {
+                    prompt,
+                    sessionId,
+                    resumeSessionId,
+                    useLoggedInUser: true,
+                    model: this.config.copilot.model,
+                });
+            }
             if (this.config.github.token && isAuthorizationError(error)) {
                 await logger.log("GitHub token authorization failed for Copilot SDK; retrying with the logged-in Copilot user.");
                 return this.runSession(run, logger, {
@@ -140,6 +155,7 @@ export class CopilotProvider {
                     gitHubToken: this.config.github.token,
                     useLoggedInUser: !this.config.github.token,
                     model: DEFAULT_MODEL,
+                    baseDirectory: this.config.copilot.baseDirectory,
                 });
             }
             throw error;

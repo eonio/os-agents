@@ -80,7 +80,10 @@ export class GitHubProvider {
         });
         if (!response.ok) {
             const body = await response.text();
-            throw new Error(`GitHub repository_dispatch failed (${response.status}): ${body || response.statusText}`);
+            return {
+                status: "failed",
+                detail: `GitHub repository_dispatch failed (${response.status}): ${body || response.statusText}`,
+            };
         }
         return {
             status: "published",

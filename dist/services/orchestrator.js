@@ -228,8 +228,7 @@ export class OrchestratorService {
             }
             const published = await this.github.publishHandoff(await this.store.getRun(record.id));
             await this.store.updateRun(record.id, (mutableRun) => {
-                mutableRun.integration.dispatchStatus =
-                    published.status === "published" ? "published" : "skipped";
+                mutableRun.integration.dispatchStatus = published.status;
                 mutableRun.integration.dispatchResponse = published.detail;
             });
             await logger.log(published.detail);

@@ -56,7 +56,9 @@ export class GitHubProvider {
     return handoff;
   }
 
-  public async publishHandoff(run: RunRecord): Promise<{ status: string; detail: string }> {
+  public async publishHandoff(
+    run: RunRecord,
+  ): Promise<{ status: "published" | "skipped" | "failed"; detail: string }> {
     const handoff = await this.writeHandoff(run);
     const repository = await this.resolveGitHubRepository(run.workspacePath);
 
@@ -93,9 +95,10 @@ export class GitHubProvider {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(
-        `GitHub repository_dispatch failed (${response.status}): ${body || response.statusText}`,
-      );
+      return {
+        status: "failed",
+        detail: `GitHub repository_dispatch failed (${response.status}): ${body || response.statusText}`,
+      };
     }
 
     return {

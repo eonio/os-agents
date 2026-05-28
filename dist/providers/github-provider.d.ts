@@ -5,7 +5,7 @@ export declare class GitHubProvider {
     buildHandoff(run: RunRecord): Promise<HandoffArtifact>;
     writeHandoff(run: RunRecord): Promise<HandoffArtifact>;
     publishHandoff(run: RunRecord): Promise<{
-        status: string;
+        status: "published" | "skipped" | "failed";
         detail: string;
     }>;
     private resolveGitHubRepository;

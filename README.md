@@ -262,4 +262,4 @@ PRDs are written to:
 
 ## GitHub and CI/CD integration
 
-Every completed run writes a handoff JSON artifact. When `GITHUB_TOKEN` is configured and the project has a GitHub `origin` remote, OS Agents also publishes a `repository_dispatch` event named `openspec_orchestrator_handoff` by default.
+Every completed run writes a handoff JSON artifact. When `GITHUB_TOKEN` is configured and the project has a GitHub `origin` remote, OS Agents also attempts to publish a `repository_dispatch` event named `openspec_orchestrator_handoff` by default. If that dispatch fails, the run still completes and the failure is recorded in the handoff status.
